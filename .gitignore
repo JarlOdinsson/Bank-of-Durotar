@@ -1,0 +1,17 @@
+# Operating system files
+.DS_Store
+Thumbs.db
+desktop.ini
+
+# Editor temporary files
+*~
+*.swp
+*.swo
+*.tmp
+*.bak
+
+# Logs
+*.log
+
+# Packaged addon releases
+*.zip
