@@ -64,13 +64,13 @@ High-level requirements:
 - Complete protected-action and hardware-event review before coding purchase, bid, post, or cancel paths.
 - Require live-client verification.
 
-### 0.1A: Scan Sidecar Entry Point
+### 0.1A: Search Sidecar Entry Point
 
-Status: pending. This is a player-facing scan entry-point amendment, not a Find Deals implementation.
+Status: complete and live-verified. This is a player-facing search and browse milestone, not a Find Deals implementation.
 
 Requirements:
 
-- Add a highly visible primary sidecar button labeled `SCAN FOR DEALS`.
+- Add a highly visible primary sidecar button labeled `SEARCH MARKET` for this alpha.
 - Use wide, high-contrast, WoW-native red/gold styling.
 - Keep the button visible near the top of the expanded Auction House sidecar.
 - Display state clearly: Ready, Waiting for query cooldown, Scanning, Completed, Failed.
@@ -79,9 +79,14 @@ Requirements:
 - Prevent repeated clicks from creating overlapping scans.
 - Respect `CanSendAuctionQuery` and verified throttling.
 - Avoid unattended retries and indefinite retry behavior.
-- Use accurate temporary wording if only a single targeted/read-only search or placeholder is implemented.
+- Use accurate temporary wording for the single targeted/read-only search.
 - Never describe a single-item targeted search as a complete Auction House scan.
 - Never imply profitability analysis exists before the Find Deals milestone is implemented.
+- Show normalized listings with icon, name, stack count, total buyout, unit buyout, bid detail, seller, time remaining, quality coloring, and no-buyout status.
+- Support sorting by lowest unit buyout, lowest total buyout, stack size, time remaining, and item name.
+- Support simple filters for buyout-only, minimum stack size, and maximum unit price.
+- Show selected listing details and protected-action placeholder text.
+- Keep the result list confined to the sidecar viewport with a bounded native scroll-frame row pool.
 
 Planned future scan modes:
 
@@ -191,6 +196,7 @@ High-level requirements:
 
 - No Milestone `0.1` behavior is included in `0.0.1`.
 - No market-history collection is included in Milestone `0.1A` unless explicitly assigned.
+- No buying, bidding, posting, cancellation, deal detection, price history, or profitability analysis is included in Milestone `0.1A`.
 - No external companion application.
 - No web service dependency.
 - No OAuth or Battle.net API credentials.

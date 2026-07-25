@@ -51,4 +51,77 @@ Run these tests in the live Classic Anniversary client. The addon cannot prove A
 
 ## Current Target
 
-Bank of Durotar `0.0.1` targets the legacy Auction House API on project ID `5` and interface `20506`. Runtime detection remains in place because future Classic Anniversary patches may change interface values, project constants, or API availability.
+Bank of Durotar `0.1.0-alpha.1` targets the legacy Auction House API on project ID `5` and interface `20506`. Runtime detection remains in place because future Classic Anniversary patches may change interface values, project constants, or API availability.
+
+## Milestone 0.1A Live-Test Checklist
+
+These tests were completed in the live Classic Anniversary client before treating `0.1.0-alpha.1` as verified.
+
+| Step | Expected Result | Observed Result |
+| --- | --- | --- |
+| Open Market away from AH with `/bod market` | Sidecar can open safely without querying; search reports AH required. | |
+| Search away from AH | Search ends in `FAILED` or waiting-for-AH messaging; no query is sent. | |
+| Open Orgrimmar AH | Sidecar appears if `Open with Auction House` is enabled. | |
+| Sidecar docking | Sidecar attaches to right edge of Blizzard AH frame without replacing, resizing, or hiding it. | Passed: sidecar docked correctly beside the Auction House. |
+| Collapse/expand | Collapse hides sidecar content; expand restores controls and results. | |
+| Fallback standalone mode | Disabling dock mode or opening away from AH uses movable standalone frame safely. | |
+| Search `Linen Cloth` | One targeted legacy query is sent from a player click. | Passed: targeted legacy search worked and returned 50 results. |
+| Loading state | Status shows Waiting for query cooldown or Scanning as appropriate. | |
+| Results | Current result page is normalized and displayed. | Passed: result rows rendered correctly. |
+| Scrollable result viewport | Rows remain clipped inside the sidecar result box with no rows below the panel. | Passed: rows were confined to the viewport and stayed inside the sidecar. |
+| Mouse-wheel scrolling | Mouse wheel scrolls through filtered results larger than the visible row pool. | Passed: mouse-wheel scrolling worked. |
+| Scrollbar | Vertical scrollbar scrolls through filtered results larger than the visible row pool. | Passed: scrollbar worked. |
+| Bounded row pool | Result list reuses six visible rows instead of creating one row per result. | Passed: six reusable rows remained inside the sidecar. |
+| Unit-price math | Total buyout and unit buyout are correct integer-copper calculations; no divide-by-zero occurs. | |
+| No-buyout handling | Listings without buyout clearly show no-buyout status and bid detail. | |
+| Sorting: unit buyout | Valid buyout listings sort by lowest unit buyout. | Passed: sorting continued to work. |
+| Sorting: total buyout | Listings sort by lowest total buyout. | |
+| Sorting: stack size | Larger stacks sort first. | |
+| Sorting: time remaining | Lower time-left buckets sort first. | |
+| Sorting: item name | Names sort alphabetically. | |
+| Buyout-only filter | No-buyout listings are hidden. | Passed: filtering continued to work. |
+| Minimum stack filter | Smaller stacks are hidden. | |
+| Maximum unit price filter | Listings above the entered unit price are hidden. | |
+| Empty result search | State becomes `EMPTY_RESULTS` or Completed with zero results; no Lua error occurs. | |
+| Cooldown behavior | Repeated search during query cooldown waits with bounded timeout and does not hammer retries. | |
+| Closing AH during search | Search becomes `CANCELLED`; timers are invalidated. | |
+| Duplicate `AUCTION_ITEM_LIST_UPDATE` events | Search finalizes once and does not duplicate observations. | |
+| Settings persistence | Open-with-AH, dock mode, width, collapse state, sort, filters, and last search persist after reload. | |
+| Minimap persistence | Minimap visibility and position persist after reload. | |
+| Diagnostics access from Options | Addon options page appears under the Classic addon options path and shows diagnostics. | |
+| Reload behavior | Addon loads without Lua errors and preserves settings. | |
+| Row selection after scrolling | Selected listing remains the correct underlying auction record after scrolling. | Passed: row selection remained correct after scrolling. |
+| Lua errors | No Lua error popup occurs. | Passed: no Lua error was observed during this test. |
+| Taint | No taint warning occurs. | Passed: no taint warning was observed during this test. |
+| Blocked actions | No blocked-action warning occurs. | Passed: no blocked-action warning was observed during this test. |
+| Protected transaction functions | `PlaceAuctionBid`, `StartAuction`, and `CancelAuction` are never invoked. | Passed by static review and live observation: no blocked-action or taint warning occurred. |
+| Actual pagination behavior | No automatic pagination occurs; record whether Blizzard shows more pages for the same query. | |
+
+## Milestone 0.1A Results Template
+
+```text
+WoW version:
+Build:
+Interface:
+Project ID:
+Auction House frame detected:
+Docked sidecar worked:
+Standalone fallback worked:
+Settings API used:
+Search text:
+Query readiness before search:
+Query cooldown behavior:
+Result event:
+Duplicate result events observed:
+Result count:
+Rows displayed:
+No-buyout listings observed:
+Sorts verified:
+Filters verified:
+Selected listing detail verified:
+Pagination observed:
+Lua errors:
+Taint or blocked-action warnings:
+Protected transaction calls observed:
+Notes:
+```

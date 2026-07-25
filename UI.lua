@@ -69,7 +69,7 @@ function BOD.UI:EnsureCreated()
 
     local title = frame:CreateFontString(nil, "OVERLAY", "GameFontNormalLarge")
     title:SetPoint("TOPLEFT", 18, -16)
-    title:SetText("Bank of Durotar 0.0.1 - AH API Probe")
+    title:SetText("Bank of Durotar " .. BOD.version .. " - AH API Probe")
 
     local close = CreateFrame("Button", nil, frame, "UIPanelCloseButton")
     close:SetPoint("TOPRIGHT", -8, -8)

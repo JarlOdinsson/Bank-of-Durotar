@@ -18,6 +18,9 @@ local function getSettings()
     if BOD.db.settings.minimap.hidden == nil then
         BOD.db.settings.minimap.hidden = false
     end
+    if BOD.db.settings.showMinimapButton == nil then
+        BOD.db.settings.showMinimapButton = not BOD.db.settings.minimap.hidden
+    end
     if type(BOD.db.settings.minimap.angle) ~= "number" then
         BOD.db.settings.minimap.angle = DEFAULT_ANGLE
     end
@@ -104,7 +107,7 @@ function BOD.MinimapButton:EnsureCreated()
 
     button:SetScript("OnClick", function(_, mouseButton)
         if mouseButton == "LeftButton" then
-            BOD.UI:Toggle()
+            BOD.Sidecar:Toggle()
         elseif mouseButton == "RightButton" then
             self:ToggleMenu()
         end
@@ -153,7 +156,7 @@ function BOD.MinimapButton:CreateMenu()
     menu:Hide()
 
     createMenuButton(menu, "Show/Hide", -8, function()
-        BOD.UI:Toggle()
+        BOD.Sidecar:Toggle()
     end)
     createMenuButton(menu, "Run Probe", -34, function()
         BOD.Probe:Start(BOD:GetSearchText())
@@ -200,8 +203,12 @@ function BOD.MinimapButton:UpdatePositionFromCursor()
 end
 
 function BOD.MinimapButton:ApplySettings()
+    if not self.button then
+        return
+    end
     self:UpdatePosition()
-    if getSettings().hidden then
+    local settings = getSettings()
+    if settings.hidden or BOD.db.settings.showMinimapButton == false then
         self.button:Hide()
     else
         self.button:Show()
@@ -210,13 +217,15 @@ end
 
 function BOD.MinimapButton:SetShown(shouldShow)
     self:EnsureCreated()
-    getSettings().hidden = not shouldShow
+    local settings = getSettings()
+    settings.hidden = not shouldShow
+    BOD.db.settings.showMinimapButton = shouldShow and true or false
     self:ApplySettings()
     BOD:Print("Minimap button " .. (shouldShow and "shown." or "hidden."))
 end
 
 function BOD.MinimapButton:ToggleShown()
-    self:SetShown(getSettings().hidden)
+    self:SetShown(not (BOD.db and BOD.db.settings and BOD.db.settings.showMinimapButton == true))
 end
 
 function BOD.MinimapButton:ResetPosition()
@@ -224,6 +233,7 @@ function BOD.MinimapButton:ResetPosition()
     local settings = getSettings()
     settings.angle = DEFAULT_ANGLE
     settings.hidden = false
+    BOD.db.settings.showMinimapButton = true
     self:ApplySettings()
     BOD:Print("Minimap button reset.")
 end

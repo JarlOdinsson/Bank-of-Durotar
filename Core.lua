@@ -1,7 +1,7 @@
 local addonName, BOD = ...
 
 BOD.addonName = addonName
-BOD.version = "0.0.1"
+BOD.version = "0.1.0-alpha.1"
 BOD.db = nil
 BOD.events = {}
 BOD.maxLogEntries = 100
@@ -9,7 +9,7 @@ BOD.maxEvents = 100
 BOD.clearRequestedAt = nil
 
 local DEFAULT_DB = {
-    schemaVersion = 1,
+    schemaVersion = 2,
     diagnostics = {
         logs = {},
         events = {},
@@ -28,6 +28,24 @@ local DEFAULT_DB = {
         minimap = {
             hidden = false,
             angle = 225,
+        },
+        openWithAuctionHouse = true,
+        showMinimapButton = true,
+        dockToAuctionHouse = true,
+        sidecarWidth = 390,
+        sidecarCollapsed = false,
+        sidecarPosition = {
+            point = "CENTER",
+            relativePoint = "CENTER",
+            x = 0,
+            y = 0,
+        },
+        lastSearchText = "Netherweave Cloth",
+        selectedSort = "unitBuyout",
+        filters = {
+            buyoutOnly = false,
+            minStackSize = 0,
+            maxUnitPrice = nil,
         },
     },
 }
@@ -60,8 +78,9 @@ function BOD:InitializeDatabase()
         BankOfDurotarDB = {}
     end
 
+    local previousSchemaVersion = tonumber(BankOfDurotarDB.schemaVersion) or 0
     BankOfDurotarDB = copyDefaults(BankOfDurotarDB, DEFAULT_DB)
-    BankOfDurotarDB.schemaVersion = 1
+    BankOfDurotarDB.schemaVersion = 2
 
     if type(BankOfDurotarDB.diagnostics.logs) ~= "table" then
         BankOfDurotarDB.diagnostics.logs = {}
@@ -75,6 +94,20 @@ function BOD:InitializeDatabase()
     end
     while #BankOfDurotarDB.diagnostics.events > self.maxEvents do
         table.remove(BankOfDurotarDB.diagnostics.events, 1)
+    end
+
+    if previousSchemaVersion < 2 then
+        if BankOfDurotarDB.settings.minimap and BankOfDurotarDB.settings.minimap.hidden ~= nil then
+            BankOfDurotarDB.settings.showMinimapButton = not BankOfDurotarDB.settings.minimap.hidden
+        end
+    end
+
+    BankOfDurotarDB.settings.sidecarWidth = math.max(360, math.min(420, tonumber(BankOfDurotarDB.settings.sidecarWidth) or 390))
+    if type(BankOfDurotarDB.settings.filters) ~= "table" then
+        BankOfDurotarDB.settings.filters = copyDefaults({}, DEFAULT_DB.settings.filters)
+    end
+    if type(BankOfDurotarDB.settings.sidecarPosition) ~= "table" then
+        BankOfDurotarDB.settings.sidecarPosition = copyDefaults({}, DEFAULT_DB.settings.sidecarPosition)
     end
 
     self.db = BankOfDurotarDB
@@ -196,6 +229,7 @@ function BOD:HandleSlashCommand(input)
         self:Print("/bod clear - run twice within 10 seconds to clear diagnostics")
         self:Print("/bod minimap - toggle minimap button")
         self:Print("/bod minimap show|hide|reset - manage minimap button")
+        self:Print("/bod market - show player-facing Auction House sidecar")
     elseif command == "show" then
         self.UI:Show()
     elseif command == "hide" then
@@ -229,6 +263,8 @@ function BOD:HandleSlashCommand(input)
         self.MinimapButton:SetShown(false)
     elseif command == "minimap reset" then
         self.MinimapButton:ResetPosition()
+    elseif command == "market" or command == "sidecar" then
+        self.Sidecar:Show()
     else
         self:Print("Unknown command. Use /bod help.")
     end
@@ -267,6 +303,15 @@ eventFrame:SetScript("OnEvent", function(_, event, ...)
     end
     if BOD.MinimapButton and BOD.MinimapButton.OnEvent then
         BOD.MinimapButton:OnEvent(event, ...)
+    end
+    if BOD.SearchController and BOD.SearchController.OnEvent then
+        BOD.SearchController:OnEvent(event, ...)
+    end
+    if BOD.Sidecar and BOD.Sidecar.OnEvent then
+        BOD.Sidecar:OnEvent(event, ...)
+    end
+    if BOD.SettingsPanel and BOD.SettingsPanel.OnEvent then
+        BOD.SettingsPanel:OnEvent(event, ...)
     end
 
     if event == "ADDON_LOADED" then

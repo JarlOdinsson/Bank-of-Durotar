@@ -1,8 +1,8 @@
 # Bank of Durotar
 
-Bank of Durotar `0.0.1` is a standalone World of Warcraft Classic Anniversary diagnostic addon. This milestone probes which Auction House APIs, events, result fields, and client constants are available in the live client.
+Bank of Durotar `0.1.0-alpha.1` is a standalone World of Warcraft Classic Anniversary Auction House addon. This alpha adds a read-only player-facing search and browse sidecar for the verified legacy Auction House API.
 
-It does not recommend trades, calculate profit, buy auctions, post auctions, bid, cancel auctions, or run unattended scans.
+It does not recommend trades, calculate profit, buy auctions, post auctions, bid, cancel auctions, collect market history, or run unattended scans.
 
 ## Installation
 
@@ -22,6 +22,8 @@ Milestone `0.0.1` was verified in a live Classic Anniversary client reporting Wo
 
 Bank of Durotar currently targets the legacy Auction House API on project ID `5`. The verified API family is `legacy`: `QueryAuctionItems`, `CanSendAuctionQuery`, `GetNumAuctionItems`, `GetAuctionItemInfo`, `GetAuctionItemLink`, and `GetAuctionItemTimeLeft` exist and worked during the probe. `C_AuctionHouse` was not present in the verified client.
 
+Milestone `0.1A` is implemented and live-verified. It adds read-only targeted search, sorting, filtering, listing inspection, and a docked scrollable sidecar.
+
 ## Commands
 
 ```text
@@ -37,11 +39,26 @@ Bank of Durotar currently targets the legacy Auction House API on project ID `5`
 /bod minimap show
 /bod minimap hide
 /bod minimap reset
+/bod market
 ```
 
-`/bod` toggles the diagnostic window. `/bod probe` runs exactly one targeted Auction House query after confirming that the Auction House is open and query permission is available. `/bod clear` must be run twice within 10 seconds to clear stored diagnostics.
+`/bod` toggles the diagnostic window. `/bod market` toggles the player-facing sidecar. `/bod probe` runs exactly one targeted diagnostic Auction House query after confirming that the Auction House is open and query permission is available. `/bod clear` must be run twice within 10 seconds to clear stored diagnostics.
 
-The minimap button opens the diagnostic window with left-click and opens options with right-click. Drag it around the minimap edge to reposition it. Use `/bod minimap hide` or `/bod minimap show` to control visibility, and `/bod minimap reset` to restore its default position.
+The minimap button opens the sidecar with left-click and opens options with right-click. Drag it around the minimap edge to reposition it. Use `/bod minimap hide` or `/bod minimap show` to control visibility, and `/bod minimap reset` to restore its default position.
+
+`/bod market` opens the player-facing Auction House sidecar. When the Auction House is open and docking is enabled, the sidecar attaches to the right edge of the Auction House frame. The primary alpha action is `SEARCH MARKET`, which performs one manually initiated targeted search.
+
+## Searching The Market
+
+1. Open the Auction House.
+2. Confirm the Bank of Durotar sidecar appears, or run `/bod market`.
+3. Enter an item name.
+4. Click `SEARCH MARKET` or `Search`.
+5. Wait for Ready, Waiting for query cooldown, Scanning, Completed, or Failed status.
+6. Sort or filter the current result page.
+7. Select a listing to inspect details.
+
+This milestone does not add a Buy button. The sidecar displays: `Purchasing will be added after protected-action verification.`
 
 ## Running The Probe
 
@@ -60,6 +77,8 @@ A zero-result search is still useful if the result event and result count are ca
 - The addon intentionally avoids `getAll` scans and repeated automatic queries.
 - Result fields vary by client; missing values are recorded as unavailable rather than invented.
 - The legacy client can emit repeated `AUCTION_ITEM_LIST_UPDATE` events for one query; the probe finalizes only once.
+- `0.1A` search reads only the current targeted result page. It does not auto-page or perform a full Auction House scan.
+- `0.1A` does not include Find Deals, profitability analysis, or market-history collection.
 
 ## Development And Compliance
 

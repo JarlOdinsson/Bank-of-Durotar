@@ -13,8 +13,12 @@ local addonName, BOD = ...
 - `Core.lua` initializes SavedVariables, slash commands, bounded logging, shared formatting helpers, and event dispatch.
 - `Diagnostics.lua` records observed events, detects client constants and API availability, and builds the copyable plain-text report.
 - `AuctionAPI.lua` is the compatibility boundary around Auction House functions.
+- `SearchResults.lua` filters, sorts, and formats normalized in-memory result views without mutating source records.
+- `SearchController.lua` owns the read-only player search state machine.
 - `Probe.lua` owns the single-shot probe state machine and persists the latest diagnostic session.
 - `UI.lua` builds the movable native diagnostic window.
+- `Sidecar.lua` builds the player-facing Auction House search and browse sidecar.
+- `SettingsPanel.lua` registers the addon options panel through the detected Classic-compatible settings API.
 - `MinimapButton.lua` builds the native minimap access button and its small options menu.
 
 ## Verified Client Target
@@ -54,17 +58,17 @@ For `0.0.1`, legacy Auction House querying is implemented. The live verified Ann
 
 No purchase, bid, post, or cancellation function is invoked.
 
-## Player-Facing Scan Entry Point
+## Player-Facing Search Entry Point
 
-Milestone `0.1A` must introduce a highly visible primary scan button in the expanded Auction House sidecar.
+Milestone `0.1A` implements the first player-facing expanded Auction House sidecar. The primary button is intentionally search-oriented because broad scan and deal detection are not implemented yet.
 
 Button label:
 
 ```text
-SCAN FOR DEALS
+SEARCH MARKET
 ```
 
-The button must use wide, high-contrast, WoW-native red/gold styling and remain visible near the top of the expanded sidecar. It must clearly display scan state:
+The button is visible near the top of the expanded sidecar. It displays search state:
 
 - Ready.
 - Waiting for query cooldown.
@@ -72,9 +76,9 @@ The button must use wide, high-contrast, WoW-native red/gold styling and remain 
 - Completed.
 - Failed.
 
-Every scan must begin from a deliberate player click. The button must not auto-start when the Auction House opens, must not create overlapping scans from repeated clicks, must respect `CanSendAuctionQuery` and verified throttling, and must not implement unattended or indefinite retry behavior.
+Every search begins from a deliberate player click. The sidecar must not auto-query when the Auction House opens, must not create overlapping searches from repeated clicks, must respect `CanSendAuctionQuery` and verified throttling, and must not implement unattended or indefinite retry behavior.
 
-During early milestones, the button may run only the current targeted/read-only workflow or show a clearly labeled placeholder if broad scan behavior is not implemented. It must not falsely label a single-item targeted search as a complete Auction House scan, and it must not imply profitability analysis exists before the Find Deals milestone.
+`0.1A` performs one targeted read-only search for the entered item text. It does not call this a complete Auction House scan, does not auto-page, and does not imply profitability analysis exists before the Find Deals milestone.
 
 Planned future scan modes:
 
@@ -84,6 +88,29 @@ Planned future scan modes:
 - Full Scan - Advanced.
 
 Only scan modes supported by the current milestone and verified APIs may be active.
+
+## Search State Machine
+
+`SearchController.lua` uses a state machine separate from the diagnostic probe:
+
+```text
+IDLE
+WAITING_FOR_AH
+WAITING_FOR_QUERY_PERMISSION
+QUERY_SENT
+WAITING_FOR_RESULTS
+RESULTS_RECEIVED
+EMPTY_RESULTS
+TIMED_OUT
+FAILED
+CANCELLED
+```
+
+The controller sends exactly one targeted legacy `QueryAuctionItems` call per deliberate player search. It waits for `CanSendAuctionQuery`, uses bounded timers, arms result handling on the next timer tick to reduce stale-event risk, and finalizes once. Duplicate `AUCTION_ITEM_LIST_UPDATE` events return immediately after the controller leaves `WAITING_FOR_RESULTS`.
+
+Results are normalized through `AuctionAPI.lua`, stored in memory only, then filtered and sorted through `SearchResults.lua`. Full auction results are not persisted in SavedVariables.
+
+`Sidecar.lua` displays results through a native `UIPanelScrollFrameTemplate` scroll frame. The visible list uses a bounded six-row frame pool; scrolling rebinds those row frames to filtered result indexes instead of creating one frame per result. The selected-listing details panel remains outside the scroll viewport, and rows are clipped to the result list area.
 
 ## Market History Retention Architecture
 
@@ -128,7 +155,7 @@ Market-history collection is not part of Milestone `0.1A` unless explicitly assi
 
 ```lua
 BankOfDurotarDB = {
-    schemaVersion = 1,
+    schemaVersion = 2,
     diagnostics = {
         logs = {},
         events = {},
@@ -142,12 +169,23 @@ BankOfDurotarDB = {
             hidden = false,
             angle = 225,
         },
+        openWithAuctionHouse = true,
+        showMinimapButton = true,
+        dockToAuctionHouse = true,
+        sidecarWidth = 390,
+        sidecarCollapsed = false,
+        sidecarPosition = {},
+        lastSearchText = "Netherweave Cloth",
+        selectedSort = "unitBuyout",
+        filters = {},
         window = {},
     },
 }
 ```
 
 Missing fields are initialized without destroying existing data. Logs and events are bounded to the latest 100 entries. Only the latest probe session is retained.
+
+Schema version `2` adds sidecar, settings, and search preference fields. It preserves diagnostics and minimap settings. Full auction results and market history are not persisted in `0.1A`.
 
 ## OAuth
 

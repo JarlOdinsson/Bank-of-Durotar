@@ -36,21 +36,25 @@ Status: pending. Do not implement until explicitly assigned.
 - [ ] Documentation.
 - [ ] Release gate.
 
-## Milestone 0.1A: Sidecar Scan Entry Point
+## Milestone 0.1A: Sidecar Search Entry Point
 
-Status: pending. Do not implement until explicitly assigned.
+Status: complete and live-verified.
 
-- [ ] Add prominent `SCAN FOR DEALS` button near the top of the expanded Auction House sidecar.
-- [ ] Use wide, high-contrast, WoW-native red/gold styling.
-- [ ] Display Ready, Waiting for query cooldown, Scanning, Completed, and Failed states.
-- [ ] Require a deliberate player click for every scan start.
-- [ ] Prevent overlapping scans from repeated clicks.
-- [ ] Respect `CanSendAuctionQuery` and verified throttling.
-- [ ] Do not auto-scan when the Auction House opens.
-- [ ] Do not implement unattended or indefinite retry behavior.
-- [ ] Use accurate placeholder or targeted-read-only wording if broad scan behavior is not implemented.
-- [ ] Do not imply profitability analysis before Find Deals exists.
-- [ ] Plan future scan modes: Quick Scan, Watchlist Only, Inventory Markets, Full Scan - Advanced.
+- [x] Add prominent `SEARCH MARKET` button near the top of the expanded Auction House sidecar.
+- [x] Use WoW-native frame, font, border, and button templates.
+- [x] Display Ready, Waiting for query cooldown, Scanning, Completed, and Failed states.
+- [x] Require a deliberate player click for every search start.
+- [x] Prevent overlapping searches from repeated clicks.
+- [x] Respect `CanSendAuctionQuery` and verified throttling.
+- [x] Do not auto-query when the Auction House opens.
+- [x] Do not implement unattended or indefinite retry behavior.
+- [x] Use accurate targeted-read-only wording.
+- [x] Do not imply profitability analysis before Find Deals exists.
+- [x] Add sorting, filtering, and listing inspection.
+- [x] Keep result rows confined to a scrollable viewport with a bounded six-row pool.
+- [x] Add settings panel access for normal options and diagnostics.
+- [x] Live-test 0.1A in the Classic Anniversary client.
+- [x] Plan future scan modes: Quick Scan, Watchlist Only, Inventory Markets, Full Scan - Advanced.
 
 ## Milestone 0.2: Local Market History
 

@@ -88,13 +88,13 @@ end
 function BOD.AuctionAPI:SendTargetedSearch(searchText)
     local family = self:GetFamily()
     if family ~= "legacy" then
-        return false, "Only legacy targeted queries are implemented in 0.0.1"
+        return false, "Only legacy targeted queries are implemented in this milestone"
     end
     if not isFunction("QueryAuctionItems") then
         return false, "QueryAuctionItems unavailable"
     end
 
-    -- Legacy Classic search. The getAll argument is explicitly false; this probe never performs a full scan.
+    -- Legacy Classic search. The getAll argument is explicitly false; this targeted query never performs a full scan.
     local ok, errorMessage = pcall(QueryAuctionItems, searchText or "", nil, nil, 0, false, nil, false, false)
     if not ok then
         return false, tostring(errorMessage)

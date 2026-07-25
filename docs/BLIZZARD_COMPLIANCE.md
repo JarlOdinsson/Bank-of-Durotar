@@ -146,3 +146,4 @@ Milestone `0.0.1` live verification:
 | Date | Milestone | Decision | Rationale |
 | --- | --- | --- | --- |
 | 2026-07-24 | `0.0.1` | Diagnostic-only probe accepted for live testing. | One manually initiated targeted query; no buy, bid, post, or cancel calls; no unattended retries; no external service; live tested successfully on project ID `5` and interface `20506`. |
+| 2026-07-25 | `0.1A` | Read-only sidecar search live-verified. | Manual targeted legacy search worked; sidecar docked correctly; bounded scrollable six-row result viewport worked; sorting, filtering, and row selection worked; no Lua error, blocked-action warning, or taint warning was observed. No full scan, auto-page, buy, bid, post, cancel, deal detection, market history, external service, or unattended retry. |
