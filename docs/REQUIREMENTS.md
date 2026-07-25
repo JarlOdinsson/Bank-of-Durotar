@@ -64,6 +64,34 @@ High-level requirements:
 - Complete protected-action and hardware-event review before coding purchase, bid, post, or cancel paths.
 - Require live-client verification.
 
+### 0.1A: Scan Sidecar Entry Point
+
+Status: pending. This is a player-facing scan entry-point amendment, not a Find Deals implementation.
+
+Requirements:
+
+- Add a highly visible primary sidecar button labeled `SCAN FOR DEALS`.
+- Use wide, high-contrast, WoW-native red/gold styling.
+- Keep the button visible near the top of the expanded Auction House sidecar.
+- Display state clearly: Ready, Waiting for query cooldown, Scanning, Completed, Failed.
+- Start only from a deliberate player click.
+- Never auto-start when the Auction House opens.
+- Prevent repeated clicks from creating overlapping scans.
+- Respect `CanSendAuctionQuery` and verified throttling.
+- Avoid unattended retries and indefinite retry behavior.
+- Use accurate temporary wording if only a single targeted/read-only search or placeholder is implemented.
+- Never describe a single-item targeted search as a complete Auction House scan.
+- Never imply profitability analysis exists before the Find Deals milestone is implemented.
+
+Planned future scan modes:
+
+- Quick Scan.
+- Watchlist Only.
+- Inventory Markets.
+- Full Scan - Advanced.
+
+Only behavior supported by the assigned milestone and verified APIs may be active.
+
 ### 0.2: Local Market History
 
 Status: pending and provisional.
@@ -73,6 +101,17 @@ High-level requirements:
 - Store bounded local price observations.
 - Preserve data integrity across reloads.
 - Show confidence based on observation count and freshness.
+- Default to a 60-day retention window.
+- Retain days 0-7 as detailed scan observations.
+- Compact days 8-30 into daily summaries.
+- Compact days 31-60 into daily low, median, high, average supply, and sample count.
+- Delete records older than the active retention window during weekly maintenance.
+- Run maintenance at most once per week from a safe event such as login or Auction House open.
+- Avoid continuous timers and player interruption.
+- Record last cleanup time.
+- Handle corrupt or partial records safely.
+- Preserve versioned database migrations.
+- Plan a future `Esc -> Options -> AddOns -> Bank of Durotar -> Market Data` settings page with retention, database size, last cleanup, clear history, and export history controls.
 
 ### 0.3: Find Deals
 
@@ -128,6 +167,8 @@ High-level requirements:
 - Handle nil and partial Auction House data safely.
 - Never fabricate missing API fields or market values.
 - Prefer no recommendation over a weak or misleading recommendation.
+- Bound market-history storage by retention window and compaction tier.
+- Delete expired market-history records only through safe, bounded maintenance.
 
 ## Security And Compliance Requirements
 
@@ -149,6 +190,7 @@ High-level requirements:
 ## Explicit Exclusions
 
 - No Milestone `0.1` behavior is included in `0.0.1`.
+- No market-history collection is included in Milestone `0.1A` unless explicitly assigned.
 - No external companion application.
 - No web service dependency.
 - No OAuth or Battle.net API credentials.

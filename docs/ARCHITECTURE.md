@@ -54,6 +54,76 @@ For `0.0.1`, legacy Auction House querying is implemented. The live verified Ann
 
 No purchase, bid, post, or cancellation function is invoked.
 
+## Player-Facing Scan Entry Point
+
+Milestone `0.1A` must introduce a highly visible primary scan button in the expanded Auction House sidecar.
+
+Button label:
+
+```text
+SCAN FOR DEALS
+```
+
+The button must use wide, high-contrast, WoW-native red/gold styling and remain visible near the top of the expanded sidecar. It must clearly display scan state:
+
+- Ready.
+- Waiting for query cooldown.
+- Scanning.
+- Completed.
+- Failed.
+
+Every scan must begin from a deliberate player click. The button must not auto-start when the Auction House opens, must not create overlapping scans from repeated clicks, must respect `CanSendAuctionQuery` and verified throttling, and must not implement unattended or indefinite retry behavior.
+
+During early milestones, the button may run only the current targeted/read-only workflow or show a clearly labeled placeholder if broad scan behavior is not implemented. It must not falsely label a single-item targeted search as a complete Auction House scan, and it must not imply profitability analysis exists before the Find Deals milestone.
+
+Planned future scan modes:
+
+- Quick Scan.
+- Watchlist Only.
+- Inventory Markets.
+- Full Scan - Advanced.
+
+Only scan modes supported by the current milestone and verified APIs may be active.
+
+## Market History Retention Architecture
+
+Future market-history storage should default to a 60-day retention window with bounded data at every tier.
+
+Retention model:
+
+- Days 0-7: detailed scan observations.
+- Days 8-30: compact daily summaries.
+- Days 31-60: compact daily low, median, high, average supply, and sample count.
+- Older than 60 days: delete during weekly maintenance.
+
+Maintenance must:
+
+- Run at most once per week.
+- Trigger from a normal safe event such as login or Auction House open.
+- Avoid continuous timers.
+- Avoid interrupting the player.
+- Bound all stored data.
+- Record last cleanup time.
+- Preserve database migrations.
+- Handle corrupt or partial records safely.
+
+Future settings page:
+
+```text
+Esc -> Options -> AddOns -> Bank of Durotar -> Market Data
+```
+
+Planned settings:
+
+- Retention: 30, 60, or 90 days.
+- Default: 60 days.
+- Database size.
+- Last cleanup.
+- Clear market history.
+- Export market history.
+
+Market-history collection is not part of Milestone `0.1A` unless explicitly assigned.
+
 ## SavedVariables
 
 ```lua

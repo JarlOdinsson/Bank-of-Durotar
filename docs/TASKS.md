@@ -36,12 +36,39 @@ Status: pending. Do not implement until explicitly assigned.
 - [ ] Documentation.
 - [ ] Release gate.
 
+## Milestone 0.1A: Sidecar Scan Entry Point
+
+Status: pending. Do not implement until explicitly assigned.
+
+- [ ] Add prominent `SCAN FOR DEALS` button near the top of the expanded Auction House sidecar.
+- [ ] Use wide, high-contrast, WoW-native red/gold styling.
+- [ ] Display Ready, Waiting for query cooldown, Scanning, Completed, and Failed states.
+- [ ] Require a deliberate player click for every scan start.
+- [ ] Prevent overlapping scans from repeated clicks.
+- [ ] Respect `CanSendAuctionQuery` and verified throttling.
+- [ ] Do not auto-scan when the Auction House opens.
+- [ ] Do not implement unattended or indefinite retry behavior.
+- [ ] Use accurate placeholder or targeted-read-only wording if broad scan behavior is not implemented.
+- [ ] Do not imply profitability analysis before Find Deals exists.
+- [ ] Plan future scan modes: Quick Scan, Watchlist Only, Inventory Markets, Full Scan - Advanced.
+
 ## Milestone 0.2: Local Market History
 
 Status: pending.
 
 - [ ] Define bounded local observation storage.
 - [ ] Define confidence and freshness rules.
+- [ ] Default retention to 60 days.
+- [ ] Keep days 0-7 as detailed scan observations.
+- [ ] Compact days 8-30 into daily summaries.
+- [ ] Compact days 31-60 into daily low, median, high, average supply, and sample count.
+- [ ] Delete records older than the configured retention window during weekly maintenance.
+- [ ] Run maintenance at most once per week from a safe event such as login or Auction House open.
+- [ ] Avoid continuous timers.
+- [ ] Record last cleanup time.
+- [ ] Handle corrupt or partial records safely.
+- [ ] Preserve database migrations.
+- [ ] Plan future Market Data options page with retention, database size, last cleanup, clear history, and export history controls.
 - [ ] Complete compliance and data-integrity review.
 
 ## Milestone 0.3: Find Deals
