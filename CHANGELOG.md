@@ -7,3 +7,4 @@
 - Added native minimap button with draggable position, options menu, and visibility commands.
 - Added initial SavedVariables schema.
 - Added documentation for architecture, testing, and roadmap.
+- Added permanent project governance and Blizzard-compliance documentation.

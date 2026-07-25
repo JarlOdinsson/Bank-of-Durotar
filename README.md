@@ -61,6 +61,18 @@ A zero-result search is still useful if the result event and result count are ca
 - Result fields vary by client; missing values are recorded as unavailable rather than invented.
 - The legacy client can emit repeated `AUCTION_ITEM_LIST_UPDATE` events for one query; the probe finalizes only once.
 
+## Development And Compliance
+
+Future work is governed by the repository instructions and compliance documents:
+
+- [AGENTS.md](AGENTS.md)
+- [Product requirements](docs/REQUIREMENTS.md)
+- [Blizzard compliance register](docs/BLIZZARD_COMPLIANCE.md)
+- [Development workflow](docs/DEVELOPMENT_WORKFLOW.md)
+- [Milestone tasks](docs/TASKS.md)
+
+Bank of Durotar is designed to comply with Blizzard's addon policy. Blizzard does not provide individual addon endorsement, authorization, certification, or approval. Live-client verification is required for client API behavior.
+
 ## Policy
 
 This addon is designed to respect Blizzard's UI Add-On Development Policy:
