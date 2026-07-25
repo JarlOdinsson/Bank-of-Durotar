@@ -79,6 +79,7 @@ A zero-result search is still useful if the result event and result count are ca
 - The legacy client can emit repeated `AUCTION_ITEM_LIST_UPDATE` events for one query; the probe finalizes only once.
 - `0.1A` search reads only the current targeted result page. It does not auto-page or perform a full Auction House scan.
 - `0.1A` does not include Find Deals, profitability analysis, or market-history collection.
+- Protected Auction House transaction workflows are planning-only in `docs/TRANSACTION_DESIGN.md`; no buy, bid, post, or cancel implementation exists yet.
 
 ## Development And Compliance
 

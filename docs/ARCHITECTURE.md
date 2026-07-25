@@ -58,6 +58,14 @@ For `0.0.1`, legacy Auction House querying is implemented. The live verified Ann
 
 No purchase, bid, post, or cancellation function is invoked.
 
+## Protected Transaction Planning
+
+Milestone `0.1B` documents future protected Auction House transaction workflows without implementing them. `docs/TRANSACTION_DESIGN.md` is the controlling design document for buying, bidding, posting, cancelling, stale-data protections, confirmation UX, live-test gates, and the proposed future `BOD.TransactionGuard` boundary.
+
+The current architecture remains read-only. Future transaction code may not call `PlaceAuctionBid`, `StartAuction`, or `CancelAuction` until live-client function signatures, hardware-event requirements, relevant events, one-click/one-action behavior, stale-index protections, and taint behavior are verified.
+
+The proposed future boundary is strict: prepare a short-lived reviewed action, require a visible final player click, revalidate live data immediately before the protected call, execute at most one protected action, and never retry or continue from timers, events, `OnUpdate`, login, AH open, search completion, or background queue processing.
+
 ## Player-Facing Search Entry Point
 
 Milestone `0.1A` implements the first player-facing expanded Auction House sidecar. The primary button is intentionally search-oriented because broad scan and deal detection are not implemented yet.

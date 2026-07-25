@@ -4,6 +4,7 @@ Later milestones depend on the verified findings from `0.0.1`. The completed liv
 
 - `0.0.1`: Auction API probe. Completed against WoW `2.5.6` build `68775`, interface `20506`, project ID `5`, legacy Auction House API.
 - `0.1A`: Read-only Auction House sidecar search and browse. Complete and live-verified as `0.1.0-alpha.1`. The alpha primary button is `SEARCH MARKET`; future `SCAN FOR DEALS` remains planned for deal detection.
+- `0.1B`: Protected Auction House transaction workflow planning. Documentation-only compliance design for future buyout, posting, and cancellation workflows; no transaction code.
 - `0.1`: Standalone search, buy, sell, and owned-auction workflow.
 - `0.2`: Local market history with bounded retention. Default 60 days, with detailed observations for days 0-7, compact summaries for days 8-30, compact low/median/high/average supply/sample count for days 31-60, and weekly cleanup of older records.
 - `0.3`: Find Deals.

@@ -36,6 +36,26 @@ Status: pending. Do not implement until explicitly assigned.
 - [ ] Documentation.
 - [ ] Release gate.
 
+## Milestone 0.1B: Protected Transaction Workflow Planning
+
+Status: documentation-only planning. Do not implement transaction behavior until explicitly assigned after go/no-go gates pass.
+
+- [x] Document verified client facts for transaction planning.
+- [x] Document unknown function signatures and event requirements.
+- [x] Design default one-click/one-action buyout model.
+- [x] Recommend excluding bidding from the first transaction release.
+- [x] Design default one-click/one-action posting model.
+- [x] Design default one-click/one-action cancellation model.
+- [x] Define future `BOD.TransactionGuard` invariants.
+- [x] Define confirmation UX requirements.
+- [x] Define stale-data protections.
+- [x] Define low-risk live-test matrix.
+- [x] Keep implementation go/no-go status blocked.
+- [ ] Live-verify transaction function signatures.
+- [ ] Live-verify hardware-event behavior.
+- [ ] Live-verify transaction events and taint behavior.
+- [ ] Obtain human approval for implementation.
+
 ## Milestone 0.1A: Sidecar Search Entry Point
 
 Status: complete and live-verified.

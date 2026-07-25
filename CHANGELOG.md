@@ -1,3 +1,9 @@
+## Unreleased
+
+- Added Milestone 0.1B protected transaction workflow planning documentation.
+- Documented go/no-go gates for future buyout, posting, and cancellation implementation.
+- Recommended excluding bidding from the first transaction release.
+
 ## 0.1.0-alpha.1
 
 - Added read-only player-facing Auction House sidecar.

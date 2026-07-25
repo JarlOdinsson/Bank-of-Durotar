@@ -125,3 +125,37 @@ Taint or blocked-action warnings:
 Protected transaction calls observed:
 Notes:
 ```
+
+## Milestone 0.1B Transaction Verification Plan
+
+`0.1B` is planning only. These tests are required before any buy, bid, post, or cancel implementation.
+
+Preparation:
+
+- Use a low-risk test character and accept that a small amount of gold may be lost.
+- Use one cheap vendor item, one inexpensive stackable trade good, and one owned auction posted at an intentionally safe price.
+- Disable other Auction House addons if they interfere with event attribution.
+- Stop immediately if any Lua error, taint warning, blocked-action warning, or unexpected transaction occurs.
+
+Read-only discovery:
+
+| Step | Expected Result | Observed Result |
+| --- | --- | --- |
+| Detect `PlaceAuctionBid`, `StartAuction`, and `CancelAuction` | Functions are present or reported unavailable without invoking them. | |
+| Identify candidate sell-slot APIs | Sell-slot, duration, and deposit-related APIs are listed without posting. | |
+| Inspect list, bidder, and owner fields | Relevant fields are captured read-only. | |
+| Register transaction-related events | Candidate events are observed without executing transactions. | |
+| Verify protected status safely | Calls outside hardware events are tested only with a safe invalid/no-op context if live review confirms no transaction can occur. | |
+
+Low-risk action verification after explicit human confirmation:
+
+| Step | Expected Result | Observed Result |
+| --- | --- | --- |
+| Buy one intentionally cheap auction from a visible `Buy 1 Auction` click | Exactly one auction is purchased or a clear client failure occurs; no retry. | |
+| Post one cheap item from a visible `Post 1 Auction` click | Exactly one auction is posted or a clear client failure occurs; no hidden follow-up. | |
+| Cancel one owned test auction from a visible `Cancel 1 Auction` click | Exactly one auction is cancelled or a clear client failure occurs; no mass-cancel. | |
+| Refresh list between review and click | Guard rejects stale data before any protected call. | |
+| Close the AH before click | Guard rejects because the Auction House is closed. | |
+| Observe taint and blocked-action behavior | No taint or blocked-action warning occurs. Any warning blocks implementation. | |
+
+Go/no-go status: no-go for transaction implementation until all required signatures, events, hardware-event behavior, one-click/one-action behavior, stale-index protections, taint behavior, compliance review, human approval, manual test plan, and rollback plan are complete.

@@ -64,6 +64,23 @@ High-level requirements:
 - Complete protected-action and hardware-event review before coding purchase, bid, post, or cancel paths.
 - Require live-client verification.
 
+### 0.1B: Protected Transaction Workflow Planning
+
+Status: planned and documentation-only. No transaction behavior is implemented.
+
+Requirements:
+
+- Document buying, bidding, posting, and cancelling workflows separately.
+- Treat `PlaceAuctionBid`, `StartAuction`, and `CancelAuction` as detected but unverified for invocation.
+- Require one visible player click for one explicitly reviewed transaction unless the live client later proves a safer permitted behavior.
+- Exclude bidding from the first transaction release unless later evidence shows clear product value and safe hardware-event behavior.
+- Design stale-index protections before implementation.
+- Design a reusable protected-action boundary before implementation.
+- Design confirmation UX with clear one-action wording.
+- Define live-client verification tests with low-value items.
+- Keep implementation blocked until function signatures, events, hardware-event behavior, one-click/one-action behavior, stale-data protections, taint behavior, compliance review, human approval, manual test plan, and rollback plan are complete.
+- Do not implement buying, bidding, posting, cancelling, mailbox handling, accounting, market history, deal detection, or profit logic in this milestone.
+
 ### 0.1A: Search Sidecar Entry Point
 
 Status: complete and live-verified. This is a player-facing search and browse milestone, not a Find Deals implementation.
