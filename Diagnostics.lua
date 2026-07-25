@@ -104,9 +104,13 @@ function BOD.Diagnostics:RecordEvent(event, ...)
     end
 
     local args = {}
-    for index = 1, select("#", ...) do
-        local value = select(index, ...)
-        args[index] = tostring(value)
+    if event == "CHAT_MSG_SYSTEM" then
+        args[1] = "[system message redacted]"
+    else
+        for index = 1, select("#", ...) do
+            local value = select(index, ...)
+            args[index] = tostring(value)
+        end
     end
 
     local entry = {
@@ -198,6 +202,16 @@ function BOD.Diagnostics:BuildReport()
         end
     else
         lines[#lines + 1] = "No probe session stored."
+    end
+
+    lines[#lines + 1] = ""
+    lines[#lines + 1] = "Transaction probe"
+    if BOD.TransactionProbe and BOD.TransactionProbe.BuildReport then
+        lines[#lines + 1] = BOD.TransactionProbe:BuildReport()
+    elseif BOD.db and BOD.db.diagnostics.transactionProbe and BOD.db.diagnostics.transactionProbe.latestReport then
+        lines[#lines + 1] = BOD.db.diagnostics.transactionProbe.latestReport
+    else
+        lines[#lines + 1] = "No transaction probe report stored."
     end
 
     return table.concat(lines, "\n")

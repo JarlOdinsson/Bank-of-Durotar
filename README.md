@@ -1,8 +1,8 @@
 # Bank of Durotar
 
-Bank of Durotar `0.1.0-alpha.1` is a standalone World of Warcraft Classic Anniversary Auction House addon. This alpha adds a read-only player-facing search and browse sidecar for the verified legacy Auction House API.
+Bank of Durotar `0.1.0-alpha.2` is a standalone World of Warcraft Classic Anniversary Auction House addon. This alpha adds a read-only player-facing search and browse sidecar plus a developer-only transaction probe for the verified legacy Auction House API.
 
-It does not recommend trades, calculate profit, buy auctions, post auctions, bid, cancel auctions, collect market history, or run unattended scans.
+Normal player workflows do not recommend trades, calculate profit, buy auctions, post auctions, bid, cancel auctions, collect market history, or run unattended scans. The developer transaction probe is separate, disabled by default, and only for live API verification with low-value tests.
 
 ## Installation
 
@@ -40,9 +40,10 @@ Milestone `0.1A` is implemented and live-verified. It adds read-only targeted se
 /bod minimap hide
 /bod minimap reset
 /bod market
+/bod txprobe
 ```
 
-`/bod` toggles the diagnostic window. `/bod market` toggles the player-facing sidecar. `/bod probe` runs exactly one targeted diagnostic Auction House query after confirming that the Auction House is open and query permission is available. `/bod clear` must be run twice within 10 seconds to clear stored diagnostics.
+`/bod` toggles the diagnostic window. `/bod market` toggles the player-facing sidecar. `/bod txprobe` opens the disabled-by-default developer transaction probe. `/bod probe` runs exactly one targeted diagnostic Auction House query after confirming that the Auction House is open and query permission is available. `/bod clear` must be run twice within 10 seconds to clear stored diagnostics.
 
 The minimap button opens the sidecar with left-click and opens options with right-click. Drag it around the minimap edge to reposition it. Use `/bod minimap hide` or `/bod minimap show` to control visibility, and `/bod minimap reset` to restore its default position.
 
@@ -79,7 +80,8 @@ A zero-result search is still useful if the result event and result count are ca
 - The legacy client can emit repeated `AUCTION_ITEM_LIST_UPDATE` events for one query; the probe finalizes only once.
 - `0.1A` search reads only the current targeted result page. It does not auto-page or perform a full Auction House scan.
 - `0.1A` does not include Find Deals, profitability analysis, or market-history collection.
-- Protected Auction House transaction workflows are planning-only in `docs/TRANSACTION_DESIGN.md`; no buy, bid, post, or cancel implementation exists yet.
+- `0.1C` transaction tests are developer-only live verification controls documented in `docs/TRANSACTION_PROBE.md`; no normal buy, bid, post, cancel, profit, market-history, or deal-finding feature exists yet.
+- Future selling-price recommendations are planned in `docs/PRICING_RECOMMENDATIONS.md`; no recommendation engine, normal selling UI, tooltip valuation, or automatic posting exists yet.
 
 ## Development And Compliance
 

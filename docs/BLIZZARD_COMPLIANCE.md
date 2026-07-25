@@ -134,11 +134,23 @@ Milestone `0.0.1` live verification:
 - Query readiness reported false immediately after completion due to the legacy query cooldown.
 - The client emitted repeated `AUCTION_ITEM_LIST_UPDATE` events for the same query.
 
+Milestone `0.1C` live posting probe:
+
+- `Prepare Post Test` passed for one manually staged sell-slot item.
+- `Prepare Final Click` passed.
+- `Execute 1 Post Test` issued exactly one direct `StartAuction` call from the visible execute button.
+- The client immediately displayed Blizzard's addon-disabled popup: `This addon has been disabled. You should install an updated version.`
+- Bank of Durotar was disabled for the session.
+- Treat this as a failed protected-action gate for direct addon posting.
+- Direct `StartAuction` posting implementation is no-go.
+- Do not retry direct `StartAuction` tests unless a separate compliance review explicitly reopens the question.
+
 ## Open Compliance Questions
 
 - Exact hardware-event requirements for purchase, bid, post, and cancel workflows must be verified before Milestone `0.1` implementation.
-- Full-scan availability and any safe use rules require separate live-client validation before use.
+- Full-scan availability, legacy `getAll` query behavior, completion conditions, cancellation behavior, duplicate event behavior, and safe use rules require Milestone `0.1D` live-client validation before production use.
 - Deposit and fee APIs for future sell and profit features require live-client verification.
+- Compliant posting research must investigate Blizzard-UI-assisted approaches only: the player uses Blizzard's own posting control, while Bank of Durotar may only read, prefill, or guide reviewed values where the live client permits it.
 - Mail, vendor, crafting, and inventory actions require separate protected-action review before any related feature.
 
 ## Compliance Decision Log
@@ -148,3 +160,6 @@ Milestone `0.0.1` live verification:
 | 2026-07-24 | `0.0.1` | Diagnostic-only probe accepted for live testing. | One manually initiated targeted query; no buy, bid, post, or cancel calls; no unattended retries; no external service; live tested successfully on project ID `5` and interface `20506`. |
 | 2026-07-25 | `0.1A` | Read-only sidecar search live-verified. | Manual targeted legacy search worked; sidecar docked correctly; bounded scrollable six-row result viewport worked; sorting, filtering, and row selection worked; no Lua error, blocked-action warning, or taint warning was observed. No full scan, auto-page, buy, bid, post, cancel, deal detection, market history, external service, or unattended retry. |
 | 2026-07-25 | `0.1B` | Transaction workflows remain blocked pending live verification. | Planning only. Future buyout, posting, and cancellation workflows must use one visible player click for one reviewed action by default, revalidate stale data immediately before the protected call, never auto-retry, and never execute from timers, events, `OnUpdate`, login, AH open, search completion, or background queues. Bidding is recommended for exclusion from the first transaction release. |
+| 2026-07-25 | `0.1C` | Developer-only transaction probe accepted for Stage A read-only live testing. | Disabled by default; requires phrase enablement; normal sidecar has no transaction controls; protected calls are isolated to final explicit developer buttons; no retry, queue, loop, bulk action, market history, profit logic, or deal detection. Transaction implementation remains no-go until live results are reviewed. |
+| 2026-07-25 | `0.1C` | Direct protected posting is no-go. | A live `StartAuction` post probe prepared successfully, passed final validation, and issued exactly one direct protected call from a visible button. The client immediately disabled the addon. Posting implementation must not use direct addon `StartAuction`; future research is limited to compliant Blizzard-UI-assisted posting where the player uses Blizzard's own posting control. |
+| 2026-07-25 | `0.3A` | Selling-price recommendation planning accepted as calculation-only architecture. | Automatic price calculation and editable field prefill are acceptable design goals when based on valid local data, but automatic posting remains prohibited. Future implementation must leave fields blank when data is unreliable, avoid guaranteed-profit language, require explicit player review, and treat posting as Blizzard-UI-assisted only unless a future compliance review proves another path safe. |

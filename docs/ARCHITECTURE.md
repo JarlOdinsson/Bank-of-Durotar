@@ -18,6 +18,8 @@ local addonName, BOD = ...
 - `Probe.lua` owns the single-shot probe state machine and persists the latest diagnostic session.
 - `UI.lua` builds the movable native diagnostic window.
 - `Sidecar.lua` builds the player-facing Auction House search and browse sidecar.
+- `TransactionProbe.lua` builds the disabled-by-default developer transaction probe.
+- Future `PricingService.lua` will calculate selling-price recommendations only after scan, history, and transaction gates are satisfied.
 - `SettingsPanel.lua` registers the addon options panel through the detected Classic-compatible settings API.
 - `MinimapButton.lua` builds the native minimap access button and its small options menu.
 
@@ -25,7 +27,7 @@ local addonName, BOD = ...
 
 Milestone `0.0.1` targets the legacy Auction House API verified on Classic Anniversary project ID `5`, `WOW_PROJECT_BURNING_CRUSADE_CLASSIC` `5`, interface `20506`, WoW `2.5.6`, build `68775`.
 
-The verified client exposes legacy Auction House globals including `QueryAuctionItems`, `CanSendAuctionQuery`, `GetNumAuctionItems`, `GetAuctionItemInfo`, `GetAuctionItemLink`, `GetAuctionItemTimeLeft`, `PlaceAuctionBid`, `StartAuction`, and `CancelAuction`. `C_AuctionHouse` was not present. Transaction functions are detection-only in this milestone and are never invoked.
+The verified client exposes legacy Auction House globals including `QueryAuctionItems`, `CanSendAuctionQuery`, `GetNumAuctionItems`, `GetAuctionItemInfo`, `GetAuctionItemLink`, `GetAuctionItemTimeLeft`, `PlaceAuctionBid`, `StartAuction`, and `CancelAuction`. `C_AuctionHouse` was not present. Normal player workflows do not invoke transaction functions. Milestone `0.1C` isolates optional developer-only transaction test calls behind explicit probe controls.
 
 ## Probe State Machine
 
@@ -62,31 +64,52 @@ No purchase, bid, post, or cancellation function is invoked.
 
 Milestone `0.1B` documents future protected Auction House transaction workflows without implementing them. `docs/TRANSACTION_DESIGN.md` is the controlling design document for buying, bidding, posting, cancelling, stale-data protections, confirmation UX, live-test gates, and the proposed future `BOD.TransactionGuard` boundary.
 
-The current architecture remains read-only. Future transaction code may not call `PlaceAuctionBid`, `StartAuction`, or `CancelAuction` until live-client function signatures, hardware-event requirements, relevant events, one-click/one-action behavior, stale-index protections, and taint behavior are verified.
+The normal player architecture remains read-only. Normal transaction features may not call `PlaceAuctionBid`, `StartAuction`, or `CancelAuction` until live-client function signatures, hardware-event requirements, relevant events, one-click/one-action behavior, stale-index protections, and taint behavior are verified through the developer probe.
 
-The proposed future boundary is strict: prepare a short-lived reviewed action, require a visible final player click, revalidate live data immediately before the protected call, execute at most one protected action, and never retry or continue from timers, events, `OnUpdate`, login, AH open, search completion, or background queue processing.
+Live `0.1C` posting verification rejected direct addon invocation of `StartAuction`: the developer probe prepared and final-click validated one post, issued exactly one `StartAuction` call from the visible execute button, and the client immediately disabled Bank of Durotar with Blizzard's addon-disabled popup. Direct protected posting implementation is therefore no-go. Future posting research is limited to compliant Blizzard-UI-assisted approaches where the player uses Blizzard's own posting control and Bank of Durotar only reads, prefills, or guides reviewed values where the live client permits it.
 
-## Player-Facing Search Entry Point
+The proposed future buyout/cancel boundary is strict: prepare a short-lived reviewed action, require a visible final player click, revalidate live data immediately before the protected call, execute at most one protected action where live verification permits it, and never retry or continue from timers, events, `OnUpdate`, login, AH open, search completion, or background queue processing. Posting is excluded from this direct-call model after the failed live `StartAuction` probe.
 
-Milestone `0.1A` implements the first player-facing expanded Auction House sidecar. The primary button is intentionally search-oriented because broad scan and deal detection are not implemented yet.
+## Developer Transaction Probe
 
-Button label:
+Milestone `0.1C` adds `TransactionProbe.lua`, a developer-only diagnostics module. It is not loaded into or referenced by the normal Auction House sidecar. Access is limited to `/bod txprobe` and the diagnostics/settings area.
+
+The probe uses a session-only enablement phrase, `ENABLE TRANSACTION PROBE`, and remains disabled after reload or logout. Prepared transaction state is memory-only. SavedVariables schema version `3` stores the latest bounded transaction-probe diagnostic report, the latest protected attempt, and the latest terminal failure under `BankOfDurotarDB.diagnostics.transactionProbe`.
+
+Protected transaction calls are isolated to final button click handlers in `TransactionProbe.lua`: `PlaceAuctionBid`, `StartAuction`, and `CancelAuction`. Timers only provide result timeouts and never invoke transaction functions. Event handlers record observations, clear stale state, mark results, or mark terminal failures; they do not invoke transaction functions.
+
+## Player-Facing Search And Future Scan Entry Points
+
+Milestone `0.1A` implements the first player-facing expanded Auction House sidecar with targeted item-name search and browsing. The existing targeted search field and `Search` button remain the supported browsing workflow.
+
+The planned future primary scan button label is:
 
 ```text
-SEARCH MARKET
+SCAN MARKET
 ```
 
-The button is visible near the top of the expanded sidecar. It displays search state:
+`SCAN MARKET` is reserved for a future player-initiated full Auction House market scan that records a bounded market snapshot. It must not be wired to the existing single-item targeted search workflow, and it must not imply deal recommendations before historical data and Find Deals are implemented and live-verified.
+
+The future scan button should be large, native-styled, and visible near the top of the expanded sidecar. The sidecar must retain a separate targeted item search field and `Search` button.
+
+Future scan status values:
 
 - Ready.
-- Waiting for query cooldown.
+- Cooldown.
+- Starting.
 - Scanning.
+- Processing results.
 - Completed.
+- Cancelled.
 - Failed.
 
-Every search begins from a deliberate player click. The sidecar must not auto-query when the Auction House opens, must not create overlapping searches from repeated clicks, must respect `CanSendAuctionQuery` and verified throttling, and must not implement unattended or indefinite retry behavior.
+Every scan begins from a deliberate player click. The sidecar must not auto-scan on login, reload, Auction House open, or a timer; must not create overlapping scans; must allow the player to cancel an active scan; must respect `CanSendAuctionQuery` and verified throttling; and must not implement unattended or indefinite retry behavior.
 
 `0.1A` performs one targeted read-only search for the entered item text. It does not call this a complete Auction House scan, does not auto-page, and does not imply profitability analysis exists before the Find Deals milestone.
+
+Milestone `0.1D` must verify legacy full-scan behavior before production use. It must verify `QueryAuctionItems` `getAll` signature, cooldown behavior, completion events, result count, partial item data, duplicate event behavior, scan duration, cancellation behavior, memory impact, and snapshot completeness criteria. Production code must not add `getAll=true` until that probe is complete and approved. Automatic page traversal is not an acceptable substitute unless separately verified and approved.
+
+Future scan progress should include a progress bar, auctions processed, unique items observed, elapsed time, and last successful scan time. Numerical percentages may only be displayed when the client exposes a reliable total, using `processedRecords / totalRecords`; otherwise the progress bar must be indeterminate and show processed-record count only.
 
 Planned future scan modes:
 
@@ -96,6 +119,16 @@ Planned future scan modes:
 - Full Scan - Advanced.
 
 Only scan modes supported by the current milestone and verified APIs may be active.
+
+Future snapshots must record completeness and reject partial snapshots from normal market-history calculations. Duplicate `AUCTION_ITEM_LIST_UPDATE` events must not duplicate observations. Stored observations must be bounded and compatible with the 60-day retention architecture; Bank of Durotar must not store every raw auction listing for 60 days. Useful future per-item aggregates include lowest valid unit buyout, median unit buyout, high or percentile value where useful, total quantity, listing count, observation timestamp, and sample count.
+
+## Pricing Recommendation Architecture
+
+Future selling-price recommendations are planned in `docs/PRICING_RECOMMENDATIONS.md`. The planned `BOD.PricingService` is a read-only calculation boundary: it retrieves current and historical observations, validates freshness and completeness, normalizes unit prices, identifies meaningful price walls, calculates bid and buyout recommendations, assigns confidence, and returns explanation codes.
+
+`BOD.PricingService` must not call `StartAuction`, `PostAuction`, `PlaceAuctionBid`, or `CancelAuction`. A future normal selling UI may request a recommendation and prefill editable denomination fields where the client permits it, but direct addon posting through `StartAuction` is no-go after live verification. Future posting must be researched as a Blizzard-UI-assisted flow where the player uses Blizzard's own posting control.
+
+Recommendation implementation is blocked until Milestone `0.1D`, market-history schema and 60-day retention, item identity keys, deterministic pricing tests, and protected posting gates are complete.
 
 ## Search State Machine
 
@@ -163,11 +196,16 @@ Market-history collection is not part of Milestone `0.1A` unless explicitly assi
 
 ```lua
 BankOfDurotarDB = {
-    schemaVersion = 2,
+    schemaVersion = 3,
     diagnostics = {
         logs = {},
         events = {},
         latestSession = nil,
+        transactionProbe = {
+            latestReport = nil,
+            lastProtectedAttempt = nil,
+            lastTerminalFailure = nil,
+        },
     },
     settings = {
         debug = false,
@@ -193,7 +231,7 @@ BankOfDurotarDB = {
 
 Missing fields are initialized without destroying existing data. Logs and events are bounded to the latest 100 entries. Only the latest probe session is retained.
 
-Schema version `2` adds sidecar, settings, and search preference fields. It preserves diagnostics and minimap settings. Full auction results and market history are not persisted in `0.1A`.
+Schema version `2` adds sidecar, settings, and search preference fields. Schema version `3` adds bounded transaction-probe diagnostic storage: latest report, latest protected attempt, and latest terminal failure. It preserves diagnostics and minimap settings. Full auction results, armed transactions, developer enablement, prepared indexes, and market history are not persisted in `0.1C`.
 
 ## OAuth
 

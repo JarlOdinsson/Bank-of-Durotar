@@ -165,6 +165,14 @@ function BOD.SettingsPanel:EnsureCreated()
         self:Refresh()
     end)
 
+    local transactionProbeButton = createButton(panel, "Developer Transaction Probe", 200, 24)
+    transactionProbeButton:SetPoint("LEFT", clearButton, "RIGHT", 10, 0)
+    transactionProbeButton:SetScript("OnClick", function()
+        if BOD.TransactionProbe then
+            BOD.TransactionProbe:Show()
+        end
+    end)
+
     panel:SetScript("OnShow", function()
         self:Refresh()
     end)
@@ -205,6 +213,7 @@ function BOD.SettingsPanel:Refresh()
         "API family: " .. tostring(capabilities.family),
         "Query readiness: " .. tostring(canQuery) .. " (" .. tostring(queryDetail) .. ")",
         "Latest probe: " .. tostring(latestProbe and latestProbe.state or "none"),
+        "Transaction probe: " .. tostring(BOD.TransactionProbe and BOD.TransactionProbe.state or "not loaded"),
         "Events recorded: " .. tostring(BOD.db and #BOD.db.diagnostics.events or 0),
         "Capability list: legacyQuery=" .. tostring(capabilities.legacyQuery)
             .. ", legacyResults=" .. tostring(capabilities.legacyResults)

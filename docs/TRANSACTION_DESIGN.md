@@ -29,7 +29,9 @@ Milestone `0.0.1` and `0.1A` verified:
 - `QueryAuctionItems` exists and supports targeted read-only searches.
 - `CanSendAuctionQuery` exists and must be respected.
 - `GetNumAuctionItems`, `GetAuctionItemInfo`, `GetAuctionItemLink`, and `GetAuctionItemTimeLeft` exist for read-only result inspection.
-- `PlaceAuctionBid`, `StartAuction`, and `CancelAuction` exist, but Bank of Durotar has never invoked them.
+- `PlaceAuctionBid`, `StartAuction`, and `CancelAuction` exist.
+- A developer-only direct `StartAuction` posting probe was invoked once from a visible execute button and the live client disabled the addon.
+- Direct addon posting through `StartAuction` is no-go.
 - The client may emit repeated `AUCTION_ITEM_LIST_UPDATE` events for one query.
 - Result indexes can be refreshed by the client and must be treated as stale unless revalidated.
 
@@ -38,13 +40,13 @@ Milestone `0.0.1` and `0.1A` verified:
 The following require live-client verification before implementation:
 
 - Exact `PlaceAuctionBid` signature and whether buyout uses `PlaceAuctionBid("list", index, buyoutTotal)`.
-- Whether `PlaceAuctionBid`, `StartAuction`, and `CancelAuction` are protected in this client.
+- Whether `PlaceAuctionBid` and `CancelAuction` are protected in this client.
 - Whether each protected action must be called directly from a fresh player hardware event.
 - Whether one player click may perform exactly one action or whether any multi-action behavior is permitted.
-- Success, failure, throttling, and refresh events for buy, bid, post, and cancel paths.
+- Success, failure, throttling, and refresh events for buy, bid, and cancel paths.
 - Sell-slot APIs, item placement rules, stack handling, duration constants, and deposit APIs for posting.
 - Owner-list fields and stable identity fields for owned auction cancellation.
-- Whether calls outside a hardware event trigger taint, blocked-action messages, Lua errors, or silent failure.
+- Whether buyout or cancel calls trigger taint, blocked-action messages, Lua errors, addon disablement, or silent failure.
 
 Until verified otherwise, every transaction is treated as one player click for one explicitly reviewed action.
 
@@ -105,23 +107,23 @@ Recommendation:
 
 ## Posting Architecture
 
-Posting should be designed as a one-auction confirmation workflow.
+Direct addon posting through `StartAuction` is no-go after live `0.1C` verification. Posting architecture must be redesigned around compliant Blizzard-UI-assisted workflows only.
 
-Safe model:
+Allowed research direction:
 
-1. Player chooses or places one item through Blizzard-supported item selection or sell-slot behavior.
-2. Addon reads only verified item, stack, duration, price, and deposit fields.
-3. Addon displays a confirmation panel titled `POST THIS AUCTION`.
-4. Player clicks `Post 1 Auction`.
-5. The click handler immediately revalidates item identity, count, price, duration, and deposit.
-6. Only if the live posting context still matches does the future guarded implementation call `StartAuction`.
-7. The button disables until client success or failure events are observed.
-8. Any next posting requires another deliberate click.
+1. Player chooses or places one item through Blizzard's supported sell UI.
+2. Bank of Durotar reads verified item, stack, duration, price, and deposit fields where permitted.
+3. Bank of Durotar may calculate or prefill editable values only where the live client permits it.
+4. Bank of Durotar shows reviewed guidance and warnings.
+5. The player uses Blizzard's own posting control for the final post.
+6. Bank of Durotar records observations after Blizzard UI events where permitted.
 
-Default posting assumption:
+No-go posting boundary:
 
-- One visible player click posts one auction.
-- Repeated stacks require repeated player clicks unless the live client explicitly proves a different behavior is both lawful and safe.
+- Do not call `StartAuction` directly from Bank of Durotar normal UI.
+- Do not call `StartAuction` directly from the developer probe again without a separate compliance review.
+- Do not replace Blizzard's posting button with an addon posting button.
+- Do not attempt taint workarounds, hidden clicks, secure-hook abuse, click simulation, alternate bypasses, or repeated calls.
 - No hidden posting queue is allowed.
 - No automatic relisting is allowed.
 
@@ -129,9 +131,31 @@ Posting protections:
 
 - Do not move items into a sell slot automatically unless live verification proves it is allowed and non-protected.
 - Do not consume partially changing stacks without revalidation.
-- Verify item link or item ID, stack count, stack size, number of stacks, duration, start price, buyout price, and deposit immediately before calling `StartAuction`.
+- Verify item link or item ID, stack count, stack size, number of stacks, duration, start price, buyout price, and deposit immediately before presenting guidance or prefills.
 - Reject posting if the Auction House is closed, inventory changed, sell slot changed, or deposit funds appear insufficient.
 - Track multisell events only for diagnostics and state resolution; never use them to drive hidden follow-up posts.
+
+## Selling-Price Recommendation Boundary
+
+Future selling-price recommendations are planned in `docs/PRICING_RECOMMENDATIONS.md`.
+
+Pricing recommendations may:
+
+- Read validated current and historical market observations.
+- Calculate suggested bid and buyout prices as integer copper.
+- Prefill clearly labeled editable selling-form fields.
+- Explain confidence and reasoning.
+- Return no recommendation when evidence is inadequate.
+
+Pricing recommendations must not:
+
+- Call `StartAuction`, `PostAuction`, `PlaceAuctionBid`, or `CancelAuction`.
+- Automatically post after scan completion, item placement, price calculation, or field prefill.
+- Silently change player-edited prices after final review.
+- Treat vendor value as auction value.
+- Use guaranteed-profit or perfect-price language.
+
+If market data, item identity, stack quantity, duration, bid, buyout, deposit, or player-edited form values change after preparation, the prepared transaction must be invalidated and the player must review again.
 
 ## Cancelling Architecture
 
@@ -322,10 +346,10 @@ Candidate functions and fields to verify:
 | --- | --- | --- |
 | Buying | `PlaceAuctionBid` | Signature, buyout behavior, hardware-event requirement, errors. |
 | Bidding | `PlaceAuctionBid` | Bid behavior, minimum increments, whether product should expose bidding. |
-| Posting | `StartAuction` | Signature, sell-slot dependency, durations, deposit behavior, multisell behavior. |
+| Posting | Blizzard sell UI-assisted workflow | Whether values can be compliantly prefilled or guided while the player uses Blizzard's own posting control. Direct addon `StartAuction` is no-go. |
 | Cancelling | `CancelAuction` | Signature, owner-list index, hardware-event requirement, stale-index behavior. |
 | Deposit | Unknown legacy API or result field | Whether deposit can be read before posting/cancelling. |
-| Sell slot | Unknown legacy API set | How the selected item is staged for `StartAuction`. |
+| Sell slot | Unknown legacy API set | How Blizzard's own sell UI stages selected items and whether addon guidance/prefill can remain compliant. |
 
 ## Live-Test Matrix
 
@@ -356,7 +380,8 @@ Low-risk action verification, only after explicit human confirmation:
 | Workflow | Test | Expected Result |
 | --- | --- | --- |
 | Buyout | Buy one intentionally cheap auction with a visible `Buy 1 Auction` click | Exactly one auction is purchased or a clear client failure occurs; no retry. |
-| Posting | Post one cheap item with a visible `Post 1 Auction` click | Exactly one auction is posted or a clear client failure occurs; no hidden follow-up. |
+| Posting | Direct `StartAuction` post probe | Completed once and failed: the client disabled the addon immediately after the direct call. Do not retry. |
+| Posting | Blizzard-UI-assisted posting research | Future research only; verify whether Bank of Durotar can safely guide or prefill values while the player uses Blizzard's own posting control. |
 | Cancelling | Cancel one owned test auction with a visible `Cancel 1 Auction` click | Exactly one owned auction is cancelled or a clear client failure occurs; no mass-cancel. |
 | Failure | Attempt action after refreshing list before click | Guard rejects stale data before protected call. |
 | Closure | Close AH before confirmation click | Guard rejects because AH is closed. |
@@ -399,4 +424,16 @@ Transaction implementation is no-go until all are true:
 - A low-risk manual test procedure exists.
 - Rollback plan exists.
 
-Current status: no-go for transaction implementation.
+Current status: no-go for transaction implementation. Direct protected posting through `StartAuction` is specifically no-go after live addon-disable behavior.
+
+## Milestone 0.1C Probe Implementation
+
+`0.1C` implements a developer-only probe for the live-verification plan. It does not implement normal transaction features.
+
+- Normal player transaction UI remains blocked.
+- Bidding remains excluded from the first transaction release.
+- Protected calls exist only in the developer probe boundary.
+- Direct `StartAuction` testing is closed as failed/no-go and must not be retried without separate compliance review.
+- Developer enablement, prepared actions, and prepared indexes are session-only.
+- Live Stage A read-only testing should be completed before any optional Stage B/C/D transaction execution.
+- Full transaction implementation remains no-go until probe results satisfy the gates in this document.

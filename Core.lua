@@ -1,7 +1,7 @@
 local addonName, BOD = ...
 
 BOD.addonName = addonName
-BOD.version = "0.1.0-alpha.1"
+BOD.version = "0.1.0-alpha.2"
 BOD.db = nil
 BOD.events = {}
 BOD.maxLogEntries = 100
@@ -9,11 +9,16 @@ BOD.maxEvents = 100
 BOD.clearRequestedAt = nil
 
 local DEFAULT_DB = {
-    schemaVersion = 2,
+    schemaVersion = 3,
     diagnostics = {
         logs = {},
         events = {},
         latestSession = nil,
+        transactionProbe = {
+            latestReport = nil,
+            lastProtectedAttempt = nil,
+            lastTerminalFailure = nil,
+        },
     },
     settings = {
         debug = false,
@@ -80,13 +85,16 @@ function BOD:InitializeDatabase()
 
     local previousSchemaVersion = tonumber(BankOfDurotarDB.schemaVersion) or 0
     BankOfDurotarDB = copyDefaults(BankOfDurotarDB, DEFAULT_DB)
-    BankOfDurotarDB.schemaVersion = 2
+    BankOfDurotarDB.schemaVersion = 3
 
     if type(BankOfDurotarDB.diagnostics.logs) ~= "table" then
         BankOfDurotarDB.diagnostics.logs = {}
     end
     if type(BankOfDurotarDB.diagnostics.events) ~= "table" then
         BankOfDurotarDB.diagnostics.events = {}
+    end
+    if type(BankOfDurotarDB.diagnostics.transactionProbe) ~= "table" then
+        BankOfDurotarDB.diagnostics.transactionProbe = copyDefaults({}, DEFAULT_DB.diagnostics.transactionProbe)
     end
 
     while #BankOfDurotarDB.diagnostics.logs > self.maxLogEntries do
@@ -210,6 +218,7 @@ function BOD:ClearDiagnostics()
     self.db.diagnostics.logs = {}
     self.db.diagnostics.events = {}
     self.db.diagnostics.latestSession = nil
+    self.db.diagnostics.transactionProbe = copyDefaults({}, DEFAULT_DB.diagnostics.transactionProbe)
     self.clearRequestedAt = nil
     self:Log("INFO", "Core", "Diagnostic results cleared.")
 end
@@ -230,6 +239,7 @@ function BOD:HandleSlashCommand(input)
         self:Print("/bod minimap - toggle minimap button")
         self:Print("/bod minimap show|hide|reset - manage minimap button")
         self:Print("/bod market - show player-facing Auction House sidecar")
+        self:Print("/bod txprobe - open developer transaction probe")
     elseif command == "show" then
         self.UI:Show()
     elseif command == "hide" then
@@ -265,6 +275,8 @@ function BOD:HandleSlashCommand(input)
         self.MinimapButton:ResetPosition()
     elseif command == "market" or command == "sidecar" then
         self.Sidecar:Show()
+    elseif command == "txprobe" or command == "transaction probe" then
+        self.TransactionProbe:Show()
     else
         self:Print("Unknown command. Use /bod help.")
     end
@@ -310,6 +322,9 @@ eventFrame:SetScript("OnEvent", function(_, event, ...)
     if BOD.Sidecar and BOD.Sidecar.OnEvent then
         BOD.Sidecar:OnEvent(event, ...)
     end
+    if BOD.TransactionProbe and BOD.TransactionProbe.OnEvent then
+        BOD.TransactionProbe:OnEvent(event, ...)
+    end
     if BOD.SettingsPanel and BOD.SettingsPanel.OnEvent then
         BOD.SettingsPanel:OnEvent(event, ...)
     end
@@ -323,6 +338,7 @@ end)
 
 BOD:RegisterEvent("ADDON_LOADED")
 BOD:RegisterEvent("PLAYER_LOGIN")
+BOD:RegisterEvent("PLAYER_LOGOUT")
 BOD:RegisterEvent("AUCTION_HOUSE_SHOW")
 BOD:RegisterEvent("AUCTION_HOUSE_CLOSED")
 BOD:RegisterEvent("AUCTION_ITEM_LIST_UPDATE")
@@ -331,7 +347,14 @@ BOD:RegisterEvent("AUCTION_BIDDER_LIST_UPDATE")
 BOD:RegisterEvent("AUCTION_MULTISELL_START")
 BOD:RegisterEvent("AUCTION_MULTISELL_UPDATE")
 BOD:RegisterEvent("AUCTION_MULTISELL_FAILURE")
+BOD:RegisterEvent("CHAT_MSG_SYSTEM")
 BOD:RegisterEvent("UI_ERROR_MESSAGE")
+BOD:RegisterEvent("BAG_UPDATE")
+BOD:RegisterEvent("BAG_UPDATE_DELAYED")
+BOD:RegisterEvent("ITEM_LOCK_CHANGED")
+BOD:RegisterEvent("PLAYER_MONEY")
+BOD:RegisterEvent("ADDON_ACTION_BLOCKED")
+BOD:RegisterEvent("ADDON_ACTION_FORBIDDEN")
 
 SLASH_BANKOFDUROTAR1 = "/bod"
 SlashCmdList.BANKOFDUROTAR = function(input)

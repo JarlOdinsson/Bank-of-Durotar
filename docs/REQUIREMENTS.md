@@ -71,7 +71,7 @@ Status: planned and documentation-only. No transaction behavior is implemented.
 Requirements:
 
 - Document buying, bidding, posting, and cancelling workflows separately.
-- Treat `PlaceAuctionBid`, `StartAuction`, and `CancelAuction` as detected but unverified for invocation.
+- Treat `PlaceAuctionBid` and `CancelAuction` as detected but unverified for invocation. Treat direct `StartAuction` invocation as failed/no-go after live addon-disable behavior.
 - Require one visible player click for one explicitly reviewed transaction unless the live client later proves a safer permitted behavior.
 - Exclude bidding from the first transaction release unless later evidence shows clear product value and safe hardware-event behavior.
 - Design stale-index protections before implementation.
@@ -81,13 +81,35 @@ Requirements:
 - Keep implementation blocked until function signatures, events, hardware-event behavior, one-click/one-action behavior, stale-data protections, taint behavior, compliance review, human approval, manual test plan, and rollback plan are complete.
 - Do not implement buying, bidding, posting, cancelling, mailbox handling, accounting, market history, deal detection, or profit logic in this milestone.
 
+### 0.1C: Developer-Only Transaction Probe
+
+Status: implemented, partially live-verified. This is developer-only live API verification, not a normal player transaction feature. Direct `StartAuction` posting is failed/no-go after the live client disabled the addon.
+
+Requirements:
+
+- Keep transaction controls out of the normal Auction House sidecar.
+- Disable the probe by default every session.
+- Require the exact confirmation phrase `ENABLE TRANSACTION PROBE` before enabling controls.
+- Inspect transaction capabilities, owned auctions, bidder auctions, sell-slot data, deposit behavior, and transaction events.
+- Provide separate guarded test paths for one buyout, one post, and one cancellation.
+- Require two-stage preparation before each final protected call.
+- Revalidate live data immediately before the final call.
+- Invoke at most one protected function once from one visible final button click.
+- Never retry, queue, loop, bulk-process, or continue from timers, events, `OnUpdate`, login, AH open, search completion, or background processing.
+- Mark state `FAILED`, mark the session blocked, disable execute controls, and persist diagnostics on `ADDON_ACTION_BLOCKED` or `ADDON_ACTION_FORBIDDEN`.
+- Persist no developer enablement, armed transaction, or prepared index across reload.
+- Persist only bounded transaction diagnostics: latest report, latest protected attempt, and latest terminal failure.
+- Keep full transaction implementation no-go until live verification and human approval are complete.
+- Keep direct `StartAuction` posting no-go. Future posting research must investigate only compliant Blizzard-UI-assisted approaches.
+
 ### 0.1A: Search Sidecar Entry Point
 
 Status: complete and live-verified. This is a player-facing search and browse milestone, not a Find Deals implementation.
 
 Requirements:
 
-- Add a highly visible primary sidecar button labeled `SEARCH MARKET` for this alpha.
+- Keep the targeted item-name search field and `Search` button for supported browsing.
+- Reserve the planned primary scan action label `SCAN MARKET` for a future full-market scan workflow.
 - Use wide, high-contrast, WoW-native red/gold styling.
 - Keep the button visible near the top of the expanded Auction House sidecar.
 - Display state clearly: Ready, Waiting for query cooldown, Scanning, Completed, Failed.
@@ -113,6 +135,30 @@ Planned future scan modes:
 - Full Scan - Advanced.
 
 Only behavior supported by the assigned milestone and verified APIs may be active.
+
+### 0.1D: Full Market Scan Probe
+
+Status: pending and probe-only. This milestone must happen before market-history collection.
+
+Requirements:
+
+- Verify the legacy `QueryAuctionItems` `getAll` query signature in the live client.
+- Verify cooldown behavior, completion events, result count behavior, partial item data behavior, duplicate event behavior, scan duration, cancellation behavior, memory impact, and snapshot completeness criteria.
+- Do not add `getAll=true` to production search code before this probe is complete and approved.
+- Do not implement automatic page traversal as a substitute unless separately verified and approved.
+- Keep every scan player-initiated from a deliberate click.
+- Never auto-scan at login, reload, Auction House open, or from a timer.
+- Prevent overlapping scans and allow player cancellation of an active scan.
+- Display scan status: Ready, Cooldown, Starting, Scanning, Processing results, Completed, Cancelled, and Failed.
+- Display a progress bar, auctions processed, unique items observed, elapsed time, and last successful scan time.
+- Display a numerical percentage only when the client exposes a reliable total; otherwise show indeterminate progress and processed-record count.
+- Never call a scan complete until a verified terminal event or condition occurs.
+- Prevent duplicate `AUCTION_ITEM_LIST_UPDATE` events from duplicating observations.
+- Record scan completeness and reject partial snapshots from normal market-history calculations.
+- Bound all observations and keep them compatible with the 60-day retention architecture.
+- Do not store every raw auction listing for 60 days.
+- Aggregate future per-item snapshot data such as lowest valid unit buyout, median unit buyout, high or percentile value where useful, total quantity, listing count, observation timestamp, and sample count.
+- Do not calculate or display deal recommendations until historical-data and Find Deals milestones are implemented and live-verified.
 
 ### 0.2: Local Market History
 
@@ -143,6 +189,27 @@ High-level requirements:
 
 - Recommend likely underpriced auctions only when local data confidence is sufficient.
 - Show maximum safe price, expected costs, risk, and reasoning.
+
+### 0.3A: Selling-Price Recommendations
+
+Status: planned and blocked. This is not implemented.
+
+High-level requirements:
+
+- Calculate responsible suggested bid and buyout prices after the player manually places an item in the sell slot.
+- Use only valid Bank of Durotar data: completed market scans, recent local history, current targeted search results, future player sale history, and vendor/deposit data only as floors or warnings.
+- Leave bid and buyout fields blank and show `No reliable market data available.` when evidence is insufficient.
+- Compare prices per unit and use stack quantity only for final stack totals.
+- Reject malformed records, zero-buyout listings, partial scans presented as complete snapshots, missing item identity, unsafe integer values, and stack counts `<= 0`.
+- Identify meaningful price walls rather than blindly undercutting the absolute cheapest listing.
+- Support simple future strategies: Match, Small Undercut, and Hold Value.
+- Default future bid recommendation to bid equals buyout for common materials and fast-moving items.
+- Show confidence as High, Medium, Low, or None with plain-language explanations.
+- Prefill editable denomination fields only after valid recommendation evidence exists.
+- Require explicit player review. Posting must be Blizzard-UI-assisted after the direct `StartAuction` no-go finding.
+- Never automatically post, retry, queue, repost, or silently change player-edited values after final review.
+- Keep pricing recommendations separate from market scanning, market-history storage, selling UI, protected transaction execution, and profit accounting.
+- Do not implement tooltip valuation hooks until the same pricing service is implemented and approved.
 
 ### 0.4: Cost Basis And Realized Profit
 

@@ -51,7 +51,7 @@ Run these tests in the live Classic Anniversary client. The addon cannot prove A
 
 ## Current Target
 
-Bank of Durotar `0.1.0-alpha.1` targets the legacy Auction House API on project ID `5` and interface `20506`. Runtime detection remains in place because future Classic Anniversary patches may change interface values, project constants, or API availability.
+Bank of Durotar `0.1.0-alpha.2` targets the legacy Auction House API on project ID `5` and interface `20506`. Runtime detection remains in place because future Classic Anniversary patches may change interface values, project constants, or API availability.
 
 ## Milestone 0.1A Live-Test Checklist
 
@@ -152,10 +152,122 @@ Low-risk action verification after explicit human confirmation:
 | Step | Expected Result | Observed Result |
 | --- | --- | --- |
 | Buy one intentionally cheap auction from a visible `Buy 1 Auction` click | Exactly one auction is purchased or a clear client failure occurs; no retry. | |
-| Post one cheap item from a visible `Post 1 Auction` click | Exactly one auction is posted or a clear client failure occurs; no hidden follow-up. | |
+| Direct post through addon `StartAuction` | No longer allowed. The live probe already failed and disabled the addon. | Failed/no-go; do not retry. |
+| Blizzard-UI-assisted posting research | Future research only; player must use Blizzard's own posting control. | |
 | Cancel one owned test auction from a visible `Cancel 1 Auction` click | Exactly one auction is cancelled or a clear client failure occurs; no mass-cancel. | |
 | Refresh list between review and click | Guard rejects stale data before any protected call. | |
 | Close the AH before click | Guard rejects because the Auction House is closed. | |
 | Observe taint and blocked-action behavior | No taint or blocked-action warning occurs. Any warning blocks implementation. | |
 
 Go/no-go status: no-go for transaction implementation until all required signatures, events, hardware-event behavior, one-click/one-action behavior, stale-index protections, taint behavior, compliance review, human approval, manual test plan, and rollback plan are complete.
+
+## Milestone 0.1C Developer Transaction Probe Live-Test Sequence
+
+`0.1C` is developer-only live verification. Do not use valuable items. Do not continue if a blocked-action, forbidden-action, taint warning, unexpected transaction, or Lua error occurs.
+
+### Stage A - Read-Only
+
+| Step | Expected Result | Observed Result |
+| --- | --- | --- |
+| Run `/bod txprobe` | Developer transaction probe opens; normal sidecar remains unchanged. | |
+| Enter `ENABLE TRANSACTION PROBE` and click `Enable Probe` | Probe enables for this session only. | |
+| Open AH | Probe records AH-related events without starting a transaction. | |
+| Click `Inspect Capabilities` | Capability list records transaction, sell-slot, deposit, and auction read APIs without invoking protected calls. | |
+| Click `Inspect Owned` | Owner count and bounded owner sample fields are recorded without calling `CancelAuction`. | |
+| Click `Inspect Bidder` | Bidder count and bounded bidder sample fields are recorded without bidding. | |
+| Manually place a cheap item in Blizzard's sell slot | Item placement is manual only. | |
+| Click `Inspect Sell Slot` | Sell-slot and deposit observations are recorded without calling `StartAuction`. | |
+| Export report from diagnostics | Transaction-probe section includes capabilities, samples, sell-slot info, events, and state. | |
+| Inspect transaction input layout | `Buyout Test`, `Post Test`, and `Cancel Test` headings are visible and grouped under `Selection / Transaction Inputs`. | |
+| Inspect buyout controls | `Selected Browse Index` is visible with helper text `Uses the currently selected Bank of Durotar listing.` | |
+| Inspect post controls | `Bidding Price`, `Buyout Price`, and `Auction Duration` labels are visible with stacked gold/silver/copper rows. | |
+| Inspect cancel controls | `Owned Auction Index` is visible with helper text `Uses one selected owned auction.` | |
+
+### Stage B - Buyout
+
+| Step | Expected Result | Observed Result |
+| --- | --- | --- |
+| Search for an extremely inexpensive auction | Normal sidecar returns read-only listings. | |
+| Select one low-value auction with buyout | Selected listing data is visible. | |
+| Click `Prepare Buyout Test` | Probe records one source result index and identifying fields. | |
+| Click `Prepare Final Click` | Probe revalidates the listing and final button becomes `Execute 1 Buyout Test`. | |
+| Click `Execute 1 Buyout Test` once | `PlaceAuctionBid` is called at most once from that click; no retry or follow-up purchase occurs. | |
+| Wait for result or timeout | Events, money change, UI errors, and state are recorded. | |
+| Export report | Report shows function arguments and terminal state. | |
+
+### Stage C - Post
+
+Direct posting remains blocked/no-go. A failed pretest showed the old single-field input could interpret bare numbers as gold, and the later direct `StartAuction` live probe disabled the addon after one visible execute click. Do not continue direct posting tests; keep the following checks only as historical validation and future UI-safety reference.
+
+| Step | Expected Result | Observed Result |
+| --- | --- | --- |
+| Manually place one cheap item in sell slot | The addon does not move the item. | |
+| Enter bid `Gold=0`, `Silver=1`, `Copper=0` | Bid preview shows `Bid total: 1s 00c`. | |
+| Enter buyout `Gold=0`, `Silver=2`, `Copper=0` | Buyout preview shows `Buyout total: 2s 00c`. | |
+| Enter `Silver=100` in either price row | `Prepare Post Test` rejects the value; it is not normalized into gold. | |
+| Enter `Copper=100` in either price row | `Prepare Post Test` rejects the value; it is not normalized into silver. | |
+| Enter buyout below bid | `Prepare Post Test` rejects before preparing a transaction. | |
+| Clear any price field | `Prepare Post Test` rejects the blank field. | |
+| Edit any price field after `Prepare Post Test` | `PREPARED` is invalidated and final execution remains disabled. | |
+| Edit any price field after `Prepare Final Click` | `READY_FOR_FINAL_CLICK` is invalidated and final execution becomes disabled. | |
+| Open a fresh probe session | `12 Hours` is selected by default. | |
+| Select `12 Hours` | Only `12 Hours` is selected; prepared API duration value is `1`. | |
+| Select `24 Hours` | Only `24 Hours` is selected; prepared API duration value is `2`. | |
+| Select `48 Hours` | Only `48 Hours` is selected; prepared API duration value is `3`. | |
+| Edit duration after `Prepare Post Test` | `PREPARED` is invalidated and final execution remains disabled. | |
+| Edit duration after `Prepare Final Click` | `READY_FOR_FINAL_CLICK` is invalidated and final execution becomes disabled. | |
+| Enter stack size and one stack | Values are visible before preparation. | |
+| Click `Prepare Post Test` | Probe reads sell-slot data and prepares one auction only. | |
+| Review prepared post snapshot | Snapshot shows `Type`, `Item`, `Stack`, `Selected index`, `Bid total`, `Buyout total`, `Duration`, `Deposit`, and `State`. | |
+| Click `Prepare Final Click` | Probe revalidates item and quantity; final button becomes `Execute 1 Post Test`. | |
+| Click `Execute 1 Post Test` once | `StartAuction` is called at most once from that click; no repost or multiple-stack loop occurs. | Failed live: exactly one direct call was issued, then Blizzard immediately disabled the addon. |
+| Wait for owned-auction update, UI error, or timeout | Events, bag changes, money changes, multisell events, and state are recorded. | Failed live: addon-disabled popup occurred immediately. Event classification may be `ADDON_ACTION_FORBIDDEN`, `ADDON_ACTION_BLOCKED`, or client disable before addon code could record the terminal event. |
+| Export report | Report shows function arguments and terminal state. | Updated probe stores latest protected attempt and latest terminal failure under `BankOfDurotarDB.diagnostics.transactionProbe` when technically possible. |
+
+Stage C direct `StartAuction` status: no-go. Do not retry direct addon posting. Future posting tests must be redesigned around compliant Blizzard-UI-assisted workflows where the player uses Blizzard's own posting control.
+
+### Stage D - Cancel
+
+| Step | Expected Result | Observed Result |
+| --- | --- | --- |
+| Refresh owned auctions | Owner list is current. | |
+| Click `Inspect Owned` | Owner count and sample fields are recorded. | |
+| Enter one owner-list index | One low-value owned auction is selected for the probe. | |
+| Click `Prepare Cancel Test` | Probe records owner index and identifying fields. | |
+| Click `Prepare Final Click` | Probe revalidates the owned listing; final button becomes `Execute 1 Cancel Test`. | |
+| Click `Execute 1 Cancel Test` once | `CancelAuction` is called at most once from that click; no mass-cancel occurs. | |
+| Wait for owner-list update, UI error, or timeout | Events and state are recorded. | |
+| Export report | Report shows function argument and terminal state. | |
+
+Each stage is optional and may be run independently. Stage A is the first approval target.
+
+## Future Pricing Recommendation Test Matrix
+
+Selling-price recommendations are planned only in `docs/PRICING_RECOMMENDATIONS.md`; no recommendation engine exists yet. Future implementation must include deterministic fixtures before live approval.
+
+Required pricing fixtures:
+
+| Case | Expected Result |
+| --- | --- |
+| No data | No bid or buyout prefill; show `No reliable market data available.` |
+| Only stale data | No default prefill beyond stale threshold; show data age and refresh warning. |
+| One valid listing | Recommendation is low confidence and explains limited sample size. |
+| One extreme low outlier | Outlier is ignored or down-weighted when not a meaningful price wall. |
+| One extreme high outlier | Outlier does not inflate estimated market value. |
+| Clear meaningful price wall | Recommendation targets the first meaningful wall according to strategy. |
+| Multiple competing price walls | Recommendation chooses a deterministic wall and explanation. |
+| Large market supply | Confidence accounts for current supply and price stability. |
+| Low market supply | Confidence lowers or returns no recommendation when evidence is weak. |
+| Buyout below vendor value | Warning is shown and recommendation respects safety-floor policy. |
+| Current market far below history | Engine may recommend Hold, Refresh Data, or No Recommendation. |
+| Current market far above history | Confidence and explanation reflect abnormal market movement. |
+| Stack-size normalization | Unit prices compare correctly across different stack sizes. |
+| Bid greater than buyout | Recommendation is rejected. |
+| Integer-copper boundaries | No overflow, floating-point money, or malformed totals occur. |
+| Partial scan rejection | Partial snapshots are excluded from normal market-history calculations. |
+| Edited-price invalidation | Prepared transaction state clears when form values change. |
+| Tooltip hidden with no data | No tooltip valuation appears. |
+| Tooltip value with fresh data | Tooltip shows estimated value, data age, and confidence. |
+| Explanation accuracy | `Why?` text matches the selected recommendation reasons. |
+
+Go/no-go status: no-go for pricing recommendation implementation until full-market scan behavior, snapshot completeness, market-history schema, 60-day retention, item identity keys, deterministic pricing tests, integer-copper math, and protected posting gates are complete.

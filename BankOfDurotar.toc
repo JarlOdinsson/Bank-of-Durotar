@@ -1,8 +1,8 @@
 ## Interface: 20506
 ## Title: Bank of Durotar
-## Notes: Milestone 0.1A read-only Auction House search and browse.
+## Notes: Milestone 0.1C developer-only Auction House transaction probe.
 ## Author: Rondo
-## Version: 0.1.0-alpha.1
+## Version: 0.1.0-alpha.2
 ## SavedVariables: BankOfDurotarDB
 
 Core.lua
@@ -13,5 +13,6 @@ SearchController.lua
 Probe.lua
 UI.lua
 Sidecar.lua
+TransactionProbe.lua
 SettingsPanel.lua
 MinimapButton.lua

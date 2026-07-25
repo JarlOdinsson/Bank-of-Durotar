@@ -56,11 +56,34 @@ Status: documentation-only planning. Do not implement transaction behavior until
 - [ ] Live-verify transaction events and taint behavior.
 - [ ] Obtain human approval for implementation.
 
+## Milestone 0.1C: Developer Transaction Probe
+
+Status: implemented, partially live-verified. Do not expose normal transaction features. Direct `StartAuction` posting is failed/no-go after live addon-disable behavior.
+
+- [x] Add disabled-by-default developer transaction probe.
+- [x] Require explicit phrase enablement.
+- [x] Add read-only capability inspection.
+- [x] Add read-only owned-auction inspection.
+- [x] Add read-only bidder-auction inspection.
+- [x] Add read-only sell-slot and deposit inspection.
+- [x] Add buyout, post, and cancellation preparation flows.
+- [x] Gate each protected call behind one explicit final button click.
+- [x] Add bounded event recording and diagnostic report output.
+- [x] Add blocked-action and forbidden-action handling.
+- [x] Keep transaction controls out of the normal sidecar.
+- [x] Group developer transaction inputs under Buyout Test, Post Test, and Cancel Test.
+- [x] Label `Selected Browse Index`, `Owned Auction Index`, `Bidding Price`, `Buyout Price`, and `Auction Duration` explicitly.
+- [ ] Live-test Stage A read-only probe.
+- [ ] Live-test optional Stage B buyout probe.
+- [x] Live-test optional Stage C post probe: direct `StartAuction` path failed and must not be retried.
+- [ ] Research compliant Blizzard-UI-assisted posting approaches only.
+- [ ] Live-test optional Stage D cancellation probe.
+
 ## Milestone 0.1A: Sidecar Search Entry Point
 
 Status: complete and live-verified.
 
-- [x] Add prominent `SEARCH MARKET` button near the top of the expanded Auction House sidecar.
+- [x] Add prominent alpha targeted-search entry point near the top of the expanded Auction House sidecar.
 - [x] Use WoW-native frame, font, border, and button templates.
 - [x] Display Ready, Waiting for query cooldown, Scanning, Completed, and Failed states.
 - [x] Require a deliberate player click for every search start.
@@ -75,6 +98,27 @@ Status: complete and live-verified.
 - [x] Add settings panel access for normal options and diagnostics.
 - [x] Live-test 0.1A in the Classic Anniversary client.
 - [x] Plan future scan modes: Quick Scan, Watchlist Only, Inventory Markets, Full Scan - Advanced.
+
+## Milestone 0.1D: Full Market Scan Probe
+
+Status: pending. Required before market-history collection.
+
+- [ ] Verify legacy `QueryAuctionItems` `getAll` signature.
+- [ ] Verify scan cooldown behavior.
+- [ ] Verify scan completion events and terminal conditions.
+- [ ] Verify reliable result count availability.
+- [ ] Verify partial item data behavior.
+- [ ] Verify duplicate `AUCTION_ITEM_LIST_UPDATE` behavior.
+- [ ] Measure scan duration.
+- [ ] Verify cancellation behavior.
+- [ ] Measure memory impact.
+- [ ] Define snapshot completeness criteria.
+- [ ] Keep `SCAN MARKET` player-initiated only.
+- [ ] Prevent overlapping scans.
+- [ ] Plan progress states and progress bar behavior.
+- [ ] Keep targeted item-name `Search` separate.
+- [ ] Do not add `getAll=true` to production code until approved.
+- [ ] Do not calculate deals or profitability.
 
 ## Milestone 0.2: Local Market History
 
@@ -102,6 +146,30 @@ Status: pending.
 - [ ] Define recommendation thresholds.
 - [ ] Define risk and liquidity labels.
 - [ ] Complete recommendation-integrity review.
+
+## Milestone 0.3A: Selling-Price Recommendations
+
+Status: planned and blocked.
+
+- [x] Document pricing recommendation architecture.
+- [x] Define permitted data sources.
+- [x] Define missing-data and stale-data behavior.
+- [x] Define unit-price normalization rules.
+- [x] Plan conservative price-wall algorithm.
+- [x] Plan undercut strategies: Match, Small Undercut, Hold Value.
+- [x] Define initial bid policy as bid equals buyout for common fast-moving items.
+- [x] Define confidence model: High, Medium, Low, None.
+- [x] Plan normal selling UI prefill behavior.
+- [x] Plan tooltip valuation integration without implementing hooks.
+- [ ] Complete Milestone `0.1D` full-market scan probe.
+- [ ] Implement and test market-history schema and 60-day retention.
+- [ ] Verify item identity and variant keys.
+- [ ] Add deterministic pricing fixtures.
+- [ ] Test integer-copper boundaries.
+- [ ] Test missing and stale data behavior.
+- [ ] Test price-wall and outlier handling.
+- [ ] Verify protected posting workflow.
+- [ ] Obtain human approval before implementation.
 
 ## Milestone 0.4: Cost Basis And Realized-Profit Tracking
 
