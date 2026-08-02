@@ -116,23 +116,21 @@ function BOD.MinimapButton:EnsureCreated()
     button:SetScript("OnDragStart", function()
         self.isDragging = true
         self:HideMenu()
+        button:SetScript("OnUpdate", function()
+            self:UpdatePositionFromCursor()
+        end)
     end)
 
     button:SetScript("OnDragStop", function()
         self.isDragging = false
-    end)
-
-    button:SetScript("OnUpdate", function()
-        if self.isDragging then
-            self:UpdatePositionFromCursor()
-        end
+        button:SetScript("OnUpdate", nil)
     end)
 
     button:SetScript("OnEnter", function()
         GameTooltip:SetOwner(button, "ANCHOR_LEFT")
         GameTooltip:SetText("Bank of Durotar")
         GameTooltip:AddLine("Left-click: Open", 1, 1, 1)
-        GameTooltip:AddLine("Right-click: Options", 1, 1, 1)
+        GameTooltip:AddLine("Right-click: Quick menu", 1, 1, 1)
         GameTooltip:AddLine("Drag: Move", 1, 1, 1)
         GameTooltip:Show()
     end)
@@ -149,22 +147,18 @@ function BOD.MinimapButton:CreateMenu()
     local template = BackdropTemplateMixin and "BackdropTemplate" or nil
     local menu = CreateFrame("Frame", "BankOfDurotarMinimapMenu", UIParent, template)
     self.menu = menu
-    menu:SetSize(134, 92)
+    menu:SetSize(134, 66)
     menu:SetFrameStrata("DIALOG")
     menu:EnableMouse(true)
     setBackdrop(menu)
     menu:Hide()
 
-    createMenuButton(menu, "Show/Hide", -8, function()
+    createMenuButton(menu, "Open / Close", -8, function()
         BOD.Sidecar:Toggle()
     end)
-    createMenuButton(menu, "Run Probe", -34, function()
-        BOD.Probe:Start(BOD:GetSearchText())
-    end)
-    createMenuButton(menu, "Toggle Debug", -60, function()
-        BOD.db.settings.debug = not BOD.db.settings.debug
-        BOD:Print("Debug logging " .. (BOD.db.settings.debug and "enabled." or "disabled."))
-        BOD.UI:Refresh()
+    createMenuButton(menu, "Scan Market", -34, function()
+        BOD.Sidecar:Show()
+        BOD.FullScanProbe:StartFromPlayerClick()
     end)
 end
 

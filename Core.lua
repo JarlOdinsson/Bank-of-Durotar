@@ -1,60 +1,88 @@
 local addonName, BOD = ...
 
 BOD.addonName = addonName
-BOD.version = "0.1.0-alpha.1"
+BOD.version = "0.5.0-beta.1"
 BOD.db = nil
-BOD.events = {}
-BOD.maxLogEntries = 100
-BOD.maxEvents = 100
-BOD.clearRequestedAt = nil
+BOD.lastError = nil
 
 local DEFAULT_DB = {
-    schemaVersion = 2,
-    diagnostics = {
-        logs = {},
-        events = {},
-        latestSession = nil,
+    schemaVersion = 12,
+    marketData = {
+        schemaVersion = 3,
+        latestSnapshotID = nil,
+        currentSnapshot = nil,
+    },
+    scan = {
+        schemaVersion = 1,
+        lastFullScanQueryAt = 0,
+        lastCompletedScanAt = 0,
+        lastScanState = "READY",
+    },
+    history = {
+        schemaVersion = 3,
+        realmKey = nil,
+        items = {},
+        scanDays = {},
+        totalScans = 0,
+        latestScanId = nil,
+        latestObservedAt = nil,
+        lastCleanupAt = 0,
+        lastCleanup = nil,
+    },
+    crafting = {
+        schemaVersion = 1,
+        professions = {},
+    },
+    salesHistory = {
+        schemaVersion = 1,
+        items = {},
+        mailboxCounts = {},
+    },
+    trading = {
+        schemaVersion = 1,
+        nextTradeId = 1,
+        openTrades = {},
+        closedTrades = {},
+        settings = {
+            enabled = true,
+            riskMode = "BALANCED",
+            emergencyReserveCopper = 0,
+            maximumCapitalPerTradeCopper = 0,
+            maximumTotalCapitalCommittedCopper = 0,
+            maxOpenTrades = 5,
+            minimumAbsoluteProfitCopper = 5000,
+            minimumDiscountPercent = 15,
+            minimumDemand = "ACTIVE",
+            minimumConfidence = "FAIR",
+            minimumObservationCount = 5,
+            showSpeculativeTrades = false,
+            tradeHistoryRetention = 50,
+        },
     },
     settings = {
-        debug = false,
-        redactIdentity = false,
-        searchText = "Netherweave Cloth",
-        window = {
-            point = "CENTER",
-            relativePoint = "CENTER",
-            x = 0,
-            y = 0,
-        },
         minimap = {
             hidden = false,
             angle = 225,
         },
-        openWithAuctionHouse = true,
         showMinimapButton = true,
+        openWithAuctionHouse = true,
         dockToAuctionHouse = true,
-        sidecarWidth = 390,
-        sidecarCollapsed = false,
+        sidecarView = "PLAN",
+        guidedMode = false,
+        guidedStep = 1,
+        goldBudgetCopper = 1000000,
+        minimumExpectedProfitCopper = 1000,
         sidecarPosition = {
             point = "CENTER",
             relativePoint = "CENTER",
             x = 0,
             y = 0,
         },
-        lastSearchText = "Netherweave Cloth",
-        selectedSort = "unitBuyout",
-        filters = {
-            buyoutOnly = false,
-            minStackSize = 0,
-            maxUnitPrice = nil,
-        },
     },
 }
 
 local function copyDefaults(target, defaults)
-    if type(target) ~= "table" then
-        target = {}
-    end
-
+    target = type(target) == "table" and target or {}
     for key, value in pairs(defaults) do
         if type(value) == "table" then
             target[key] = copyDefaults(target[key], value)
@@ -62,7 +90,6 @@ local function copyDefaults(target, defaults)
             target[key] = value
         end
     end
-
     return target
 end
 
@@ -74,56 +101,113 @@ local function trim(value)
 end
 
 function BOD:InitializeDatabase()
-    if type(BankOfDurotarDB) ~= "table" then
-        BankOfDurotarDB = {}
-    end
+    BankOfDurotarDB = copyDefaults(type(BankOfDurotarDB) == "table" and BankOfDurotarDB or {}, DEFAULT_DB)
+    BankOfDurotarDB.schemaVersion = 12
 
-    local previousSchemaVersion = tonumber(BankOfDurotarDB.schemaVersion) or 0
-    BankOfDurotarDB = copyDefaults(BankOfDurotarDB, DEFAULT_DB)
-    BankOfDurotarDB.schemaVersion = 2
+    -- Remove data used only by the retired developer probes.
+    BankOfDurotarDB.diagnostics = nil
 
-    if type(BankOfDurotarDB.diagnostics.logs) ~= "table" then
-        BankOfDurotarDB.diagnostics.logs = {}
+    local marketData = BankOfDurotarDB.marketData
+    local oldMarketSchema = tonumber(marketData.schemaVersion) or 0
+    marketData.schemaVersion = 3
+    if oldMarketSchema ~= 3 then
+        -- Alpha snapshots duplicated large records. Start clean with the compact release schema.
+        marketData.currentSnapshot = nil
+        marketData.latestSnapshotID = nil
     end
-    if type(BankOfDurotarDB.diagnostics.events) ~= "table" then
-        BankOfDurotarDB.diagnostics.events = {}
+    if type(marketData.currentSnapshot) ~= "table" then
+        marketData.currentSnapshot = nil
+        marketData.latestSnapshotID = nil
     end
+    marketData.currentByRealm = nil
+    marketData.realmOrder = nil
+    marketData.snapshots = nil
+    marketData.maxSnapshots = nil
 
-    while #BankOfDurotarDB.diagnostics.logs > self.maxLogEntries do
-        table.remove(BankOfDurotarDB.diagnostics.logs, 1)
-    end
-    while #BankOfDurotarDB.diagnostics.events > self.maxEvents do
-        table.remove(BankOfDurotarDB.diagnostics.events, 1)
-    end
+    local scan = BankOfDurotarDB.scan
+    scan.schemaVersion = 1
+    scan.lastFullScanQueryAt = math.max(0, tonumber(scan.lastFullScanQueryAt) or 0)
+    scan.lastCompletedScanAt = math.max(0, tonumber(scan.lastCompletedScanAt) or 0)
+    scan.lastScanState = type(scan.lastScanState) == "string" and scan.lastScanState or "READY"
 
-    if previousSchemaVersion < 2 then
-        if BankOfDurotarDB.settings.minimap and BankOfDurotarDB.settings.minimap.hidden ~= nil then
-            BankOfDurotarDB.settings.showMinimapButton = not BankOfDurotarDB.settings.minimap.hidden
-        end
+    local history = BankOfDurotarDB.history
+    local oldHistorySchema = tonumber(history.schemaVersion) or 0
+    history.schemaVersion = 3
+    if oldHistorySchema ~= 3 then
+        history.items = {}
+        history.scanDays = {}
+        history.totalScans = 0
+        history.realmKey = nil
+        history.firstObservedAt = nil
+        history.latestObservedAt = nil
+        history.latestScanId = nil
     end
+    history.items = type(history.items) == "table" and history.items or {}
+    history.scanDays = type(history.scanDays) == "table" and history.scanDays or {}
+    history.scanIds = nil
+    history.lastCleanupAt = math.max(0, tonumber(history.lastCleanupAt) or 0)
 
-    BankOfDurotarDB.settings.sidecarWidth = math.max(360, math.min(420, tonumber(BankOfDurotarDB.settings.sidecarWidth) or 390))
-    if type(BankOfDurotarDB.settings.filters) ~= "table" then
-        BankOfDurotarDB.settings.filters = copyDefaults({}, DEFAULT_DB.settings.filters)
+    local crafting = BankOfDurotarDB.crafting
+    crafting.schemaVersion = 1
+    crafting.professions = type(crafting.professions) == "table" and crafting.professions or {}
+
+    local salesHistory = BankOfDurotarDB.salesHistory
+    salesHistory.schemaVersion = 1
+    salesHistory.items = type(salesHistory.items) == "table" and salesHistory.items or {}
+    salesHistory.mailboxCounts = type(salesHistory.mailboxCounts) == "table" and salesHistory.mailboxCounts or {}
+
+    local trading = BankOfDurotarDB.trading
+    trading.schemaVersion = 1
+    trading.nextTradeId = math.max(1, math.floor(tonumber(trading.nextTradeId) or 1))
+    trading.openTrades = type(trading.openTrades) == "table" and trading.openTrades or {}
+    trading.closedTrades = type(trading.closedTrades) == "table" and trading.closedTrades or {}
+    trading.settings = copyDefaults(type(trading.settings) == "table" and trading.settings or {}, DEFAULT_DB.trading.settings)
+    local tradeSettings = trading.settings
+    local validModes = { CONSERVATIVE = true, BALANCED = true, AGGRESSIVE = true }
+    local validDemand = { UNKNOWN = true, SLOW = true, ACTIVE = true, HOT = true }
+    local validConfidence = { SPECULATIVE = true, FAIR = true, STRONG = true }
+    tradeSettings.riskMode = validModes[tostring(tradeSettings.riskMode):upper()] and tostring(tradeSettings.riskMode):upper() or "BALANCED"
+    tradeSettings.minimumDemand = validDemand[tostring(tradeSettings.minimumDemand):upper()] and tostring(tradeSettings.minimumDemand):upper() or "ACTIVE"
+    tradeSettings.minimumConfidence = validConfidence[tostring(tradeSettings.minimumConfidence):upper()] and tostring(tradeSettings.minimumConfidence):upper() or "FAIR"
+    tradeSettings.enabled = tradeSettings.enabled ~= false
+    tradeSettings.showSpeculativeTrades = tradeSettings.showSpeculativeTrades == true
+    for _, key in ipairs({ "emergencyReserveCopper", "maximumCapitalPerTradeCopper", "maximumTotalCapitalCommittedCopper", "minimumAbsoluteProfitCopper" }) do
+        tradeSettings[key] = math.max(0, math.min(2147483647, math.floor(tonumber(tradeSettings[key]) or 0)))
     end
-    if type(BankOfDurotarDB.settings.sidecarPosition) ~= "table" then
-        BankOfDurotarDB.settings.sidecarPosition = copyDefaults({}, DEFAULT_DB.settings.sidecarPosition)
+    tradeSettings.maxOpenTrades = math.max(1, math.min(5, math.floor(tonumber(tradeSettings.maxOpenTrades) or 5)))
+    tradeSettings.minimumDiscountPercent = math.max(0, math.min(90, math.floor(tonumber(tradeSettings.minimumDiscountPercent) or 15)))
+    tradeSettings.minimumObservationCount = math.max(1, math.min(30, math.floor(tonumber(tradeSettings.minimumObservationCount) or 5)))
+    tradeSettings.tradeHistoryRetention = math.max(1, math.min(500, math.floor(tonumber(tradeSettings.tradeHistoryRetention) or 50)))
+
+    local settings = BankOfDurotarDB.settings
+    settings.sidecarPosition = type(settings.sidecarPosition) == "table" and settings.sidecarPosition or copyDefaults({}, DEFAULT_DB.settings.sidecarPosition)
+    if BOD.PlanMoney then
+        -- These fields have always been stored as copper, even when the old UI displayed only gold or silver.
+        settings.goldBudgetCopper = BOD.PlanMoney:MigrateStoredCopper(settings.goldBudgetCopper, 1000000)
+        settings.minimumExpectedProfitCopper = BOD.PlanMoney:MigrateStoredCopper(settings.minimumExpectedProfitCopper, 1000)
+    else
+        settings.goldBudgetCopper = math.max(0, math.min(2147483647, math.floor(tonumber(settings.goldBudgetCopper) or 1000000)))
+        settings.minimumExpectedProfitCopper = math.max(0, math.min(2147483647, math.floor(tonumber(settings.minimumExpectedProfitCopper) or 1000)))
     end
+    settings.searchText = nil
+    settings.lastSearchText = nil
+    settings.selectedSort = nil
+    settings.filters = nil
+    settings.sidecarCollapsed = nil
+    settings.opportunityMinimumConfidence = nil
+    settings.opportunityMinimumUpsideText = nil
+    settings.opportunityIncludeLowSample = nil
 
     self.db = BankOfDurotarDB
 end
 
 function BOD:FormatTimestamp(timestamp)
-    timestamp = tonumber(timestamp) or time()
-    return date("%Y-%m-%d %H:%M:%S", timestamp)
+    return date("%Y-%m-%d %H:%M:%S", tonumber(timestamp) or time())
 end
 
 function BOD:FormatMoney(copper)
-    copper = tonumber(copper) or 0
-    local gold = math.floor(copper / 10000)
-    local silver = math.floor((copper % 10000) / 100)
-    local copperOnly = copper % 100
-    return string.format("%dg %02ds %02dc", gold, silver, copperOnly)
+    copper = math.max(0, math.floor(tonumber(copper) or 0))
+    return string.format("%dg %02ds %02dc", math.floor(copper / 10000), math.floor((copper % 10000) / 100), copper % 100)
 end
 
 function BOD:Print(message)
@@ -131,46 +215,16 @@ function BOD:Print(message)
 end
 
 function BOD:Log(level, source, message)
-    if not self.db then
-        return
-    end
-
-    level = level or "INFO"
-    source = source or "Core"
-    message = tostring(message or "")
-
-    local entry = {
-        timestamp = time(),
-        level = level,
-        source = source,
-        message = message,
-    }
-
-    local logs = self.db.diagnostics.logs
-    logs[#logs + 1] = entry
-    while #logs > self.maxLogEntries do
-        table.remove(logs, 1)
-    end
-
-    if level == "ERROR" or (self.db.settings.debug and level ~= "DEBUG") then
-        self:Print(string.format("[%s] %s: %s", level, source, message))
-    elseif self.db.settings.debug and level == "DEBUG" then
-        self:Print(string.format("[DEBUG] %s: %s", source, message))
-    end
-
-    if self.UI and self.UI.Refresh then
-        self.UI:Refresh()
+    if level == "ERROR" then
+        self.lastError = tostring(message or "")
+        self:Print(tostring(source or "Error") .. ": " .. self.lastError)
     end
 end
 
-function BOD:Debug(source, message)
-    self:Log("DEBUG", source, message)
+function BOD:Debug()
 end
 
 function BOD:SetError(source, message)
-    if self.Probe then
-        self.Probe.lastError = tostring(message or "")
-    end
     self:Log("ERROR", source, message)
 end
 
@@ -178,7 +232,6 @@ function BOD:SafeCall(source, fn, ...)
     if type(fn) ~= "function" then
         return false, "missing function"
     end
-
     local results = { pcall(fn, ...) }
     local ok = table.remove(results, 1)
     if not ok then
@@ -188,83 +241,48 @@ function BOD:SafeCall(source, fn, ...)
     return true, unpack(results)
 end
 
-function BOD:GetSearchText()
-    local text = self.db and self.db.settings and self.db.settings.searchText
-    text = trim(text)
-    if text == "" then
-        text = "Netherweave Cloth"
+function BOD:RefreshOwnedUI()
+    if self.Sidecar then
+        self.Sidecar:EnsureCreated()
+        self.Sidecar:ApplyLayout()
+        self.Sidecar:Refresh()
     end
-    return text
-end
-
-function BOD:SetSearchText(text)
-    if self.db and self.db.settings then
-        self.db.settings.searchText = trim(text)
+    if self.MinimapButton then
+        self.MinimapButton:ApplySettings()
     end
-end
-
-function BOD:ClearDiagnostics()
-    if not self.db then
-        return
-    end
-    self.db.diagnostics.logs = {}
-    self.db.diagnostics.events = {}
-    self.db.diagnostics.latestSession = nil
-    self.clearRequestedAt = nil
-    self:Log("INFO", "Core", "Diagnostic results cleared.")
 end
 
 function BOD:HandleSlashCommand(input)
     local command = trim(input):lower()
-
-    if command == "" then
-        self.UI:Toggle()
-    elseif command == "help" then
-        self:Print("/bod - toggle diagnostics")
-        self:Print("/bod show - show diagnostics")
-        self:Print("/bod hide - hide diagnostics")
-        self:Print("/bod probe - run one targeted AH probe")
-        self:Print("/bod status - print current probe status")
-        self:Print("/bod debug - toggle debug logging")
-        self:Print("/bod clear - run twice within 10 seconds to clear diagnostics")
-        self:Print("/bod minimap - toggle minimap button")
-        self:Print("/bod minimap show|hide|reset - manage minimap button")
-        self:Print("/bod market - show player-facing Auction House sidecar")
-    elseif command == "show" then
-        self.UI:Show()
+    if command == "" or command == "show" or command == "market" then
+        self.Sidecar:Show()
+        self.Sidecar:SetView("PLAN")
     elseif command == "hide" then
-        self.UI:Hide()
-    elseif command == "probe" then
-        self.Probe:Start(self:GetSearchText())
-    elseif command == "status" then
-        local canQuery, detail = self.AuctionAPI:CanQuery()
-        self:Print(string.format("State: %s. AH open: %s. Query: %s (%s).",
-            self.Probe:GetState(),
-            tostring(self.AuctionAPI:IsAuctionHouseOpen()),
-            tostring(canQuery),
-            tostring(detail or "unknown")))
-    elseif command == "debug" then
-        self.db.settings.debug = not self.db.settings.debug
-        self:Print("Debug logging " .. (self.db.settings.debug and "enabled." or "disabled."))
-        self.UI:Refresh()
-    elseif command == "clear" then
-        local now = time()
-        if self.clearRequestedAt and now - self.clearRequestedAt <= 10 then
-            self:ClearDiagnostics()
-        else
-            self.clearRequestedAt = now
-            self:Print("Run /bod clear again within 10 seconds to clear stored diagnostics.")
-        end
-    elseif command == "minimap" then
-        self.MinimapButton:ToggleShown()
+        self.Sidecar:Hide()
+    elseif command == "scan" then
+        self.Sidecar:Show()
+        self.FullScanProbe:StartFromPlayerClick()
+    elseif command == "buy" or command == "opportunities" then
+        self.Sidecar:Show()
+        self.Sidecar:SetView("PLAN")
+    elseif command == "trades" or command == "trade" then
+        self.Sidecar:Show()
+        self.Sidecar:SetView("TRADES")
+    elseif command == "sell" or command == "sellprice" then
+        self.Sidecar:Show()
+        self.Sidecar:SetView("SELL")
+    elseif command == "craft" or command == "crafting" then
+        self.Sidecar:Show()
+        self.Sidecar:SetView("CRAFT")
     elseif command == "minimap show" then
         self.MinimapButton:SetShown(true)
     elseif command == "minimap hide" then
         self.MinimapButton:SetShown(false)
     elseif command == "minimap reset" then
         self.MinimapButton:ResetPosition()
-    elseif command == "market" or command == "sidecar" then
-        self.Sidecar:Show()
+    elseif command == "help" then
+        self:Print("/bod - open | /bod scan | /bod buy | /bod trades | /bod sell | /bod craft")
+        self:Print("/bod minimap show|hide|reset")
     else
         self:Print("Unknown command. Use /bod help.")
     end
@@ -273,70 +291,40 @@ end
 local eventFrame = CreateFrame("Frame")
 BOD.eventFrame = eventFrame
 
-function BOD:RegisterEvent(eventName)
-    local ok, errorMessage = pcall(eventFrame.RegisterEvent, eventFrame, eventName)
-    if not ok then
-        self:Log("WARN", "Core", "Could not register event " .. tostring(eventName) .. ": " .. tostring(errorMessage))
-    end
-end
-
 eventFrame:SetScript("OnEvent", function(_, event, ...)
     if event == "ADDON_LOADED" and ... ~= addonName then
         return
     end
-
     if event == "ADDON_LOADED" then
         BOD:InitializeDatabase()
     end
-
-    if BOD.Diagnostics and BOD.Diagnostics.OnEvent then
-        BOD.Diagnostics:OnEvent(event, ...)
-    end
-    if BOD.AuctionAPI and BOD.AuctionAPI.OnEvent then
-        BOD.AuctionAPI:OnEvent(event, ...)
-    end
-    if BOD.Probe and BOD.Probe.OnEvent then
-        BOD.Probe:OnEvent(event, ...)
-    end
-    if BOD.UI and BOD.UI.OnEvent then
-        BOD.UI:OnEvent(event, ...)
-    end
-    if BOD.MinimapButton and BOD.MinimapButton.OnEvent then
-        BOD.MinimapButton:OnEvent(event, ...)
-    end
-    if BOD.SearchController and BOD.SearchController.OnEvent then
-        BOD.SearchController:OnEvent(event, ...)
-    end
-    if BOD.Sidecar and BOD.Sidecar.OnEvent then
-        BOD.Sidecar:OnEvent(event, ...)
-    end
-    if BOD.SettingsPanel and BOD.SettingsPanel.OnEvent then
-        BOD.SettingsPanel:OnEvent(event, ...)
-    end
-
-    if event == "ADDON_LOADED" then
-        BOD:Log("INFO", "Core", "Loaded version " .. BOD.version .. ".")
-    elseif event == "PLAYER_LOGIN" then
-        BOD:Log("INFO", "Core", "Player login complete.")
-    end
+    if BOD.AuctionAPI then BOD.AuctionAPI:OnEvent(event, ...) end
+    if BOD.MinimapButton then BOD.MinimapButton:OnEvent(event, ...) end
+    if BOD.CraftingService then BOD.CraftingService:OnEvent(event, ...) end
+    if BOD.SalesHistory then BOD.SalesHistory:OnEvent(event, ...) end
+    if BOD.Sidecar then BOD.Sidecar:OnEvent(event, ...) end
+    if BOD.FullScanProbe then BOD.FullScanProbe:OnEvent(event, ...) end
 end)
 
-BOD:RegisterEvent("ADDON_LOADED")
-BOD:RegisterEvent("PLAYER_LOGIN")
-BOD:RegisterEvent("AUCTION_HOUSE_SHOW")
-BOD:RegisterEvent("AUCTION_HOUSE_CLOSED")
-BOD:RegisterEvent("AUCTION_ITEM_LIST_UPDATE")
-BOD:RegisterEvent("AUCTION_OWNED_LIST_UPDATE")
-BOD:RegisterEvent("AUCTION_BIDDER_LIST_UPDATE")
-BOD:RegisterEvent("AUCTION_MULTISELL_START")
-BOD:RegisterEvent("AUCTION_MULTISELL_UPDATE")
-BOD:RegisterEvent("AUCTION_MULTISELL_FAILURE")
-BOD:RegisterEvent("UI_ERROR_MESSAGE")
+for _, eventName in ipairs({
+    "ADDON_LOADED",
+    "PLAYER_LOGIN",
+    "AUCTION_HOUSE_SHOW",
+    "AUCTION_HOUSE_CLOSED",
+    "AUCTION_ITEM_LIST_UPDATE",
+    "BAG_UPDATE_DELAYED",
+    "PLAYER_MONEY",
+    "GET_ITEM_INFO_RECEIVED",
+    "TRADE_SKILL_SHOW",
+    "TRADE_SKILL_UPDATE",
+    "MAIL_SHOW",
+    "MAIL_INBOX_UPDATE",
+}) do
+    eventFrame:RegisterEvent(eventName)
+end
 
 SLASH_BANKOFDUROTAR1 = "/bod"
 SlashCmdList.BANKOFDUROTAR = function(input)
-    if not BOD.db then
-        BOD:InitializeDatabase()
-    end
+    if not BOD.db then BOD:InitializeDatabase() end
     BOD:HandleSlashCommand(input)
 end

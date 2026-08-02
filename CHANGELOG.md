@@ -1,25 +1,35 @@
-## Unreleased
+# Changelog
 
-- Added Milestone 0.1B protected transaction workflow planning documentation.
-- Documented go/no-go gates for future buyout, posting, and cancellation implementation.
-- Recommended excluding bidding from the first transaction release.
+## 0.5.0-beta.1 — Milestone A and Trades vertical slice
 
-## 0.1.0-alpha.1
+### Plan money controls
 
-- Added read-only player-facing Auction House sidecar.
-- Added manual targeted market search using the verified legacy Auction House API.
-- Added listing normalization, sorting, filtering, selection details, and a bounded scrollable result list with six reusable row frames.
-- Added settings panel compatibility for addon options and diagnostics access.
-- Added SavedVariables schema version 2 for sidecar and search preferences.
-- Documented 0.1A as implemented and live-verified after successful Classic Anniversary testing.
+- Replaced the ambiguous Budget and Min Profit fields with separate Gold, Silver, and Copper inputs.
+- Added integer-copper decoding, overflow normalization, safe invalid-input handling, keyboard navigation, and denomination tooltips.
+- Preserved existing copper-denominated settings and kept Plan limits independent from Trades capital rules.
+- Added deterministic conversion, migration, reopening, separation, and overflow tests.
 
-## 0.0.1
+### Trades vertical slice
 
-- Added runtime client and Auction House API detection.
-- Added controlled targeted-query probe for the legacy Auction House API.
-- Added bounded diagnostic event and log capture.
-- Added copyable diagnostic report.
-- Added native minimap button with draggable position, options menu, and visibility commands.
-- Added initial SavedVariables schema.
-- Added documentation for architecture, testing, and roadmap.
-- Added permanent project governance and Blizzard-compliance documentation.
+- Added `Plan | Trades | Craft | Sell Price` navigation without replacing Plan or Best Move Now.
+- Added shared supported-value, exit-range, stability, deterministic demand, confidence, ownership, and freshness analysis.
+- Added separate Quick Move and Trade policies plus four-way candidate routing.
+- Added actual-character-gold trading capital, emergency reserve, committed capital, Conservative/Balanced/Aggressive modes, and editable Trade Rules.
+- Added one Best Trade, two secondary opportunities, profit/return ranges, demand/confidence labels, main risk, and explicit empty states.
+- Added explicit Track, Mark Purchased, Mark Listed, Record Sale, Close, and Abandon actions. None perform Auction House transactions.
+- Added multiple purchase batches, weighted average cost, partial-sale cost allocation, remaining basis, realized profit, and bounded trade history.
+- Added deterministic Trade policy/tracker fixtures and detailed trade-system documentation.
+
+- Replaced the normal-view numeric flip score with `Strong`, `Fair`, `Speculative`, and hard `Avoid` decisions.
+- Added deterministic safety gates for stale or malformed data, non-positive and below-minimum profit, unsafe prices, misleading vendor economics, weak evidence, manipulation risk, relisting loss, and excessive owned bag exposure.
+- Added a configurable minimum expected profit, defaulting to 10 silver.
+- Ranked safe opportunities by trust first, then bag exposure, conservative net profit, capital required, internal score, and a stable name tie-break.
+- Added a featured `Best Move Now` card with item icon/name, exact listing quantity, owned count, maximum unit price, conservative net profit, trust label, one main risk, and scan freshness language.
+- Kept ranks 2–10 in the scrollable `More Safe Flips` list and retained three bag-sale suggestions.
+- Added item icons and plain-language hover help to buy, bag-sale, and craft suggestions.
+- Corrected the craft note to reflect that expected deposit loss is already included in its profit estimate.
+- Changed Guided mode into a dismissible, state-aware next-action helper instead of a fixed tutorial sequence.
+- Limited the minimap button's cursor-position updates to the brief time it is actively being dragged.
+- Added deterministic recommendation-policy fixtures and expanded the offline checks.
+
+Offline checks pass. In-game Classic Anniversary validation is still required before release; this changelog does not claim the UI or API behavior has been live-tested for Milestone A.

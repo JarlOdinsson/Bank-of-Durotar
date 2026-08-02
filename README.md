@@ -1,100 +1,54 @@
 # Bank of Durotar
 
-Bank of Durotar `0.1.0-alpha.1` is a standalone World of Warcraft Classic Anniversary Auction House addon. This alpha adds a read-only player-facing search and browse sidecar for the verified legacy Auction House API.
+Bank of Durotar `0.5.0-beta.1` is a small Auction House helper for WoW Classic Anniversary.
 
-It does not recommend trades, calculate profit, buy auctions, post auctions, bid, cancel auctions, collect market history, or run unattended scans.
+## What it does
 
-## Installation
+1. Enter the Gold, Silver, and Copper you are willing to spend in Plan's Budget fields.
+2. Open the Auction House and click `SCAN MARKET`.
+3. Set the smallest profit worth pursuing with the separate Min Profit Gold, Silver, and Copper fields (10 silver by default), then review one featured best move and up to nine additional safe flips.
+4. Open `Trades` for larger, evidence-backed commodity positions and explicitly track any position you accept.
+5. Review up to three unbound items already in your bags and their suggested sell prices.
+6. Open each profession window once, then review up to three profitable crafts.
 
-Copy the `BankOfDurotar` folder to:
-
-```text
-World of Warcraft/_classic_era_/Interface/AddOns/BankOfDurotar/
-```
-
-The Anniversary installation path may differ on a given machine. Verify the active game folder in the Battle.net launcher before installing.
-
-The `.toc` currently uses `## Interface: 20506`, based on live Classic Anniversary client verification from WoW `2.5.6` build `68775`. Update it after a client patch if WoW marks the addon out of date.
-
-## Verified Client Target
-
-Milestone `0.0.1` was verified in a live Classic Anniversary client reporting WoW `2.5.6`, build `68775`, interface `20506`, `WOW_PROJECT_ID` `5`, and `WOW_PROJECT_BURNING_CRUSADE_CLASSIC` `5`.
-
-Bank of Durotar currently targets the legacy Auction House API on project ID `5`. The verified API family is `legacy`: `QueryAuctionItems`, `CanSendAuctionQuery`, `GetNumAuctionItems`, `GetAuctionItemInfo`, `GetAuctionItemLink`, and `GetAuctionItemTimeLeft` exist and worked during the probe. `C_AuctionHouse` was not present in the verified client.
-
-Milestone `0.1A` is implemented and live-verified. It adds read-only targeted search, sorting, filtering, listing inspection, and a docked scrollable sidecar.
+The addon stores the latest market snapshot plus compact daily averages for up to 1,000 active items over 30 days. Repeated scans build the historical baseline used to judge buys and protect estimates from one-scan spikes. Plan remains the quick workflow. Trades uses stronger multi-day evidence, actual character gold, a reserve, controlled exposure, supported exit ranges, and low/normal profit ranges for exact stackable commodity listings. A recommendation becomes an open trade only when `Track Trade` is clicked. Purchase batches, listings, sales, closing, and abandonment are recorded manually; current market value is never called realized profit. The addon also learns successful and expired auctions whenever the mailbox is opened. Buying, selling, vending, crafting, and all protected actions remain manual.
 
 ## Commands
 
 ```text
-/bod
-/bod help
-/bod show
-/bod hide
-/bod probe
-/bod status
-/bod debug
-/bod clear
-/bod minimap
-/bod minimap show
-/bod minimap hide
-/bod minimap reset
-/bod market
+/bod                 Open the addon
+/bod scan            Scan the market
+/bod buy             Show the Gold Plan
+/bod trades          Show larger tracked trade opportunities
+/bod sell            Show sell-price advice
+/bod craft           Show profitable known crafts
+/bod minimap show    Show the minimap button
+/bod minimap hide    Hide the minimap button
+/bod minimap reset   Reset its position
 ```
 
-`/bod` toggles the diagnostic window. `/bod market` toggles the player-facing sidecar. `/bod probe` runs exactly one targeted diagnostic Auction House query after confirming that the Auction House is open and query permission is available. `/bod clear` must be run twice within 10 seconds to clear stored diagnostics.
+## Install
 
-The minimap button opens the sidecar with left-click and opens options with right-click. Drag it around the minimap edge to reposition it. Use `/bod minimap hide` or `/bod minimap show` to control visibility, and `/bod minimap reset` to restore its default position.
+Copy the `BankOfDurotar` folder into the active Classic Anniversary `Interface/AddOns` directory, then run `/reload`.
 
-`/bod market` opens the player-facing Auction House sidecar. When the Auction House is open and docking is enabled, the sidecar attaches to the right edge of the Auction House frame. The primary alpha action is `SEARCH MARKET`, which performs one manually initiated targeted search.
+## Live test
 
-## Searching The Market
+Open the Auction House and confirm:
 
-1. Open the Auction House.
-2. Confirm the Bank of Durotar sidecar appears, or run `/bod market`.
-3. Enter an item name.
-4. Click `SEARCH MARKET` or `Search`.
-5. Wait for Ready, Waiting for query cooldown, Scanning, Completed, or Failed status.
-6. Sort or filter the current result page.
-7. Select a listing to inspect details.
+- No scan starts automatically.
+- `SCAN MARKET` starts exactly one scan or clearly shows Blizzard's cooldown.
+- A completed scan opens `Gold Plan` with the saved budget.
+- The plan shows no more than ten ranked buys and their combined cost never exceeds the budget.
+- The first buy is visually featured and shows icon/name, exact quantity, owned count, maximum price, conservative profit, trust, main risk, and latest-scan wording.
+- Guided mode changes with Auction House, scan, Plan, Craft, and Sell states and can always be turned off.
+- Navigation reads `Plan | Trades | Craft | Sell Price`; Trades shows actual liquid gold, reserve, available/committed capital, one best trade, two secondary trades, open trades, and history.
+- Tracking a trade performs no purchase. Multiple manual purchase batches produce a weighted cost basis, and manual partial sales preserve remaining basis.
+- No individual suggested buy costs more than half the budget.
+- Bag suggestions show no more than three unbound items with quantities and prices; single-item gear requires an exact variant match.
+- Opening each profession teaches the addon its currently visible known recipes.
+- `Craft for Profit` shows material cost, sell price, estimated profit, and margin.
+- Empty or weak market data produces a clear no-safe-result message instead of a guess.
+- `Sell Price` accepts a typed or shift-clicked item and returns a price or a clear no-data message.
+- No Lua error, taint warning, disconnect, automatic purchase, or automatic listing occurs.
 
-This milestone does not add a Buy button. The sidecar displays: `Purchasing will be added after protected-action verification.`
-
-## Running The Probe
-
-1. Log in and open the Auction House.
-2. Run `/bod show`.
-3. Change the search text if needed. The default is `Netherweave Cloth`.
-4. Click `Probe`, use the minimap menu's `Run Probe`, or run `/bod probe`.
-5. Wait for `RESULTS_RECEIVED`, `TIMED_OUT`, or `FAILED`.
-6. Click `Export Report`, then copy the highlighted report text.
-
-A zero-result search is still useful if the result event and result count are captured.
-
-## Known Limitations
-
-- Modern `C_AuctionHouse` search is detected but not implemented as a query path in this milestone.
-- The addon intentionally avoids `getAll` scans and repeated automatic queries.
-- Result fields vary by client; missing values are recorded as unavailable rather than invented.
-- The legacy client can emit repeated `AUCTION_ITEM_LIST_UPDATE` events for one query; the probe finalizes only once.
-- `0.1A` search reads only the current targeted result page. It does not auto-page or perform a full Auction House scan.
-- `0.1A` does not include Find Deals, profitability analysis, or market-history collection.
-- Protected Auction House transaction workflows are planning-only in `docs/TRANSACTION_DESIGN.md`; no buy, bid, post, or cancel implementation exists yet.
-
-## Development And Compliance
-
-Future work is governed by the repository instructions and compliance documents:
-
-- [AGENTS.md](AGENTS.md)
-- [Product requirements](docs/REQUIREMENTS.md)
-- [Blizzard compliance register](docs/BLIZZARD_COMPLIANCE.md)
-- [Development workflow](docs/DEVELOPMENT_WORKFLOW.md)
-- [Milestone tasks](docs/TASKS.md)
-
-Bank of Durotar is designed to comply with Blizzard's addon policy. Blizzard does not provide individual addon endorsement, authorization, certification, or approval. Live-client verification is required for client API behavior.
-
-## Policy
-
-This addon is designed to respect Blizzard's UI Add-On Development Policy:
-
-https://us.forums.blizzard.com/en/wow/t/ui-add-on-development-policy/24534
+This beta targets the verified legacy Auction House API on Classic Anniversary interface `20506` (client 2.5.6). The scanner completed a live full-market scan on that client before the Trades work; the new `0.5.0-beta.1` Trades UI and lifecycle still require in-game validation.
