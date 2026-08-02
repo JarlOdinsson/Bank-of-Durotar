@@ -18,6 +18,34 @@ def check(value: bool, label: str) -> None:
         raise AssertionError(label)
 
 
+MAX_COPPER = 2_147_483_647
+
+
+def money_component(value: object) -> int:
+    if isinstance(value, bool):
+        return 0
+    if isinstance(value, int):
+        return max(0, value)
+    if isinstance(value, str) and value.strip().isdigit():
+        return int(value.strip())
+    return 0
+
+
+def plan_money(gold: object, silver: object, copper: object) -> tuple[int, int, int, int]:
+    total = min(MAX_COPPER, money_component(gold) * 10_000 + money_component(silver) * 100 + money_component(copper))
+    return total // 10_000, total % 10_000 // 100, total % 100, total
+
+
+def migrate_plan_copper(value: object, fallback: int) -> int:
+    if isinstance(value, bool):
+        return fallback
+    if isinstance(value, int) and value >= 0:
+        return min(MAX_COPPER, value)
+    if isinstance(value, str) and value.strip().isdigit():
+        return min(MAX_COPPER, int(value.strip()))
+    return fallback
+
+
 def median(values: list[int]) -> int | None:
     values = sorted(values)
     if not values:
@@ -310,10 +338,33 @@ def test_trades_policy() -> None:
     check(2500 - allocated == 1000 and total_cost - allocated == 1500, "partial sale realized profit and remaining basis")
 
 
+def test_plan_money() -> None:
+    check(plan_money(0, 0, 0) == (0, 0, 0, 0), "zero money")
+    check(plan_money(7, 0, 0)[3] == 70_000, "gold-only money")
+    check(plan_money(0, 42, 0)[3] == 4_200, "silver-only money")
+    check(plan_money(0, 0, 73)[3] == 73, "copper-only money")
+    check(plan_money(12, 34, 56) == (12, 34, 56, 123_456), "mixed money")
+    check(plan_money(0, 99, 99)[3] == 9_999, "maximum silver and copper")
+    check(plan_money(1, 125, 0) == (2, 25, 0, 22_500), "silver overflow")
+    check(plan_money(1, 0, 240) == (1, 2, 40, 10_240), "copper overflow")
+    check(plan_money(1, 125, 240) == (2, 27, 40, 22_740), "combined overflow")
+    check(plan_money("", "", "")[3] == 0, "empty money")
+    check(plan_money("bad", "S", "$5")[3] == 0, "nonnumeric money")
+    check(plan_money("-1", -2, "-3")[3] == 0, "negative money")
+    check(plan_money("1.5", 2.5, "3.1")[3] == 0, "decimal money")
+    check(plan_money(999_999_999_999, 0, 0)[3] == MAX_COPPER, "large gold clamped")
+    check(migrate_plan_copper(123_456, 1_000_000) == 123_456, "saved copper migration")
+    check(migrate_plan_copper("123456", 1_000_000) == 123_456, "numeric-string migration")
+    check(migrate_plan_copper("12g 34s", 1_000_000) == 1_000_000, "invalid historical string fallback")
+    reopened = plan_money(*plan_money(12, 34, 56)[:3])
+    check(reopened[3] == 123_456, "reopening reproduces denominations")
+    check(plan_money(8, 0, 0)[3] != plan_money(0, 50, 0)[3], "budget and minimum profit separate")
+
+
 def test_package() -> None:
     toc = read("BankOfDurotar.toc")
     loaded = [line.strip() for line in toc.splitlines() if line.strip().endswith(".lua")]
-    check(len(loaded) == 18, "minimal module count")
+    check(len(loaded) == 19, "minimal module count")
     check(all((ROOT / path).is_file() for path in loaded), "TOC files exist")
     check("## Version: 0.5.0-beta.1" in toc and 'BOD.version = "0.5.0-beta.1"' in read("Core.lua"), "version alignment")
 
@@ -342,6 +393,7 @@ def test_workflow() -> None:
     trade_policy = read("TradePolicy.lua")
     trade_tracker = read("TradeTracker.lua")
     trade_service = read("TradeService.lua")
+    plan_money_source = read("PlanMoney.lua")
 
     check('"AUCTION_ITEM_LIST_UPDATE"' in core, "result event registered")
     check("QueryAuctionItems" not in scan, "scanner uses API adapter")
@@ -385,7 +437,15 @@ def test_workflow() -> None:
     check("GUIDED · NEXT ACTION" in sidecar and "guidedTargetView" in sidecar and '"Show me"' in sidecar, "state-aware guided action")
     check("BEST MOVE NOW" in sidecar and "MORE SAFE FLIPS" in sidecar, "featured recommendation hierarchy")
     check("Trust:" in sidecar and "Main risk:" in sidecar and "Maximum buy price:" in sidecar, "plain-language recommendation proof")
-    check("minimumExpectedProfitCopper" in core and "Min profit" in sidecar, "configurable minimum absolute profit")
+    check("minimumExpectedProfitCopper" in core and "Min Profit" in sidecar, "configurable minimum absolute profit")
+    check("budgetMoneyBoxes" in sidecar and "minimumProfitMoneyBoxes" in sidecar, "three-part Plan money controls")
+    check('"G"' in sidecar and '"S"' in sidecar and '"C"' in sidecar, "compact denomination suffixes")
+    check("NormalizeFields" in sidecar and "totalCopper" in sidecar, "Apply saves normalized integer copper")
+    check("self:RefreshPlan()" in sidecar and "self:RefreshGuide()" in sidecar, "Apply refreshes Plan and Guided mode")
+    check("MigrateStoredCopper" in core and "These fields have always been stored as copper" in core, "existing copper migration")
+    check("MAX_COPPER" in plan_money_source and "FromFields" in plan_money_source and "ToFields" in plan_money_source, "bounded Plan money conversion")
+    save_budget = sidecar[sidecar.index("function BOD.Sidecar:SaveBudget"):sidecar.index("function BOD.Sidecar:RefreshPlan")]
+    check("trading" not in save_budget and "TradeService" not in save_budget, "Plan values do not overwrite Trades capital")
     check("RecommendationPolicy.lua" in read("BankOfDurotar.toc"), "recommendation policy packaged")
     check("conservativeNetProfit" in opportunity and "relistFailuresModeled" in opportunity, "conservative relisting math")
     check("CollectBagInventory" in gold_plan and "ownedQuantities" in gold_plan, "owned bag exposure awareness")
@@ -410,11 +470,12 @@ def main() -> None:
     test_math()
     test_recommendation_policy()
     test_trades_policy()
+    test_plan_money()
     test_package()
     test_workflow()
     lua = shutil.which("lua") or shutil.which("lua5.1")
     if lua:
-        for fixture in ("tests/recommendation_policy_test.lua", "tests/trade_system_test.lua"):
+        for fixture in ("tests/recommendation_policy_test.lua", "tests/trade_system_test.lua", "tests/plan_money_test.lua"):
             subprocess.run([lua, fixture], cwd=ROOT, check=True)
     print("offline checks: PASS")
 

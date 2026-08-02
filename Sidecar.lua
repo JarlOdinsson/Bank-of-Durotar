@@ -18,7 +18,6 @@ BOD.Sidecar = {
 local WIDTH, HEIGHT = 520, 640
 local BUY_ROWS, SELL_ROWS, CRAFT_ROWS = 10, 3, 3
 local GUIDED_HEIGHT = 716
-local COPPER_PER_GOLD = 10000
 local MAX_SAFE_INTEGER = 2147483647
 
 local function settings()
@@ -44,6 +43,32 @@ local function sectionLabel(parent, label)
     local value = font(parent, "GameFontNormalSmall")
     value:SetText(label)
     value:SetTextColor(0.85, 0.68, 0.32)
+    return value
+end
+
+local function planMoneyBox(parent, width, denomination, helpText)
+    local box = CreateFrame("EditBox", nil, parent, "InputBoxTemplate")
+    box:SetSize(width, 24)
+    box:SetAutoFocus(false)
+    box:SetNumeric(true)
+    box:SetText("0")
+    box:SetScript("OnEditFocusGained", function(value) value:HighlightText() end)
+    box:SetScript("OnEditFocusLost", function(value) if value:GetText() == "" then value:SetText("0") end end)
+    box:SetScript("OnEnter", function(value)
+        if not GameTooltip then return end
+        GameTooltip:SetOwner(value, "ANCHOR_TOP")
+        GameTooltip:SetText(denomination)
+        GameTooltip:AddLine(helpText, 1, 1, 1, true)
+        GameTooltip:Show()
+    end)
+    box:SetScript("OnLeave", function() if GameTooltip then GameTooltip:Hide() end end)
+    return box
+end
+
+local function moneySuffix(parent, anchor, text)
+    local value = font(parent, "GameFontNormalSmall")
+    value:SetPoint("LEFT", anchor, "RIGHT", 3, 0)
+    value:SetText(text)
     return value
 end
 
@@ -179,35 +204,55 @@ function BOD.Sidecar:CreatePlanPanel(frame, anchor)
     budgetLabel:SetPoint("TOPLEFT", heading, "BOTTOMLEFT", 0, -14)
     budgetLabel:SetText("Budget")
 
-    self.budgetBox = CreateFrame("EditBox", nil, panel, "InputBoxTemplate")
-    self.budgetBox:SetSize(80, 24)
-    self.budgetBox:SetPoint("LEFT", budgetLabel, "RIGHT", 10, 0)
-    self.budgetBox:SetAutoFocus(false)
-    self.budgetBox:SetNumeric(true)
-    self.budgetBox:SetText(tostring(math.floor((settings().goldBudgetCopper or 1000000) / COPPER_PER_GOLD)))
-    self.budgetBox:SetScript("OnEnterPressed", function(box) self:SaveBudget(); box:ClearFocus() end)
-
-    local goldLabel = font(panel, "GameFontNormalSmall")
-    goldLabel:SetPoint("LEFT", self.budgetBox, "RIGHT", 5, 0)
-    goldLabel:SetText("gold")
-
-    local apply = button(panel, "Apply", 72, 24)
-    apply:SetPoint("LEFT", goldLabel, "RIGHT", 12, 0)
-    apply:SetScript("OnClick", function() self:SaveBudget() end)
+    local budgetHelp = "The maximum amount Bank of Durotar may recommend spending on a quick Plan action."
+    self.budgetMoneyBoxes = {
+        gold = planMoneyBox(panel, 48, "Gold", budgetHelp),
+        silver = planMoneyBox(panel, 28, "Silver", budgetHelp),
+        copper = planMoneyBox(panel, 28, "Copper", budgetHelp),
+    }
+    self.budgetMoneyBoxes.gold:SetPoint("LEFT", budgetLabel, "RIGHT", 5, 0)
+    local budgetGoldSuffix = moneySuffix(panel, self.budgetMoneyBoxes.gold, "G")
+    self.budgetMoneyBoxes.silver:SetPoint("LEFT", budgetGoldSuffix, "RIGHT", 4, 0)
+    local budgetSilverSuffix = moneySuffix(panel, self.budgetMoneyBoxes.silver, "S")
+    self.budgetMoneyBoxes.copper:SetPoint("LEFT", budgetSilverSuffix, "RIGHT", 4, 0)
+    local budgetCopperSuffix = moneySuffix(panel, self.budgetMoneyBoxes.copper, "C")
 
     local minimumLabel = font(panel, "GameFontNormalSmall")
-    minimumLabel:SetPoint("LEFT", apply, "RIGHT", 12, 0)
-    minimumLabel:SetText("Min profit")
-    self.minimumProfitBox = CreateFrame("EditBox", nil, panel, "InputBoxTemplate")
-    self.minimumProfitBox:SetSize(55, 24)
-    self.minimumProfitBox:SetPoint("LEFT", minimumLabel, "RIGHT", 8, 0)
-    self.minimumProfitBox:SetAutoFocus(false)
-    self.minimumProfitBox:SetNumeric(true)
-    self.minimumProfitBox:SetText(tostring(math.floor((settings().minimumExpectedProfitCopper or 1000) / 100)))
-    self.minimumProfitBox:SetScript("OnEnterPressed", function(box) self:SaveBudget(); box:ClearFocus() end)
-    local silverLabel = font(panel, "GameFontNormalSmall")
-    silverLabel:SetPoint("LEFT", self.minimumProfitBox, "RIGHT", 5, 0)
-    silverLabel:SetText("silver")
+    minimumLabel:SetPoint("LEFT", budgetCopperSuffix, "RIGHT", 10, 0)
+    minimumLabel:SetText("Min Profit")
+    local profitHelp = "The minimum estimated net profit required before Plan recommends an action. Evaluated after known Auction House cuts and modeled costs where available."
+    self.minimumProfitMoneyBoxes = {
+        gold = planMoneyBox(panel, 48, "Gold", profitHelp),
+        silver = planMoneyBox(panel, 28, "Silver", profitHelp),
+        copper = planMoneyBox(panel, 28, "Copper", profitHelp),
+    }
+    self.minimumProfitMoneyBoxes.gold:SetPoint("LEFT", minimumLabel, "RIGHT", 5, 0)
+    local profitGoldSuffix = moneySuffix(panel, self.minimumProfitMoneyBoxes.gold, "G")
+    self.minimumProfitMoneyBoxes.silver:SetPoint("LEFT", profitGoldSuffix, "RIGHT", 4, 0)
+    local profitSilverSuffix = moneySuffix(panel, self.minimumProfitMoneyBoxes.silver, "S")
+    self.minimumProfitMoneyBoxes.copper:SetPoint("LEFT", profitSilverSuffix, "RIGHT", 4, 0)
+    local profitCopperSuffix = moneySuffix(panel, self.minimumProfitMoneyBoxes.copper, "C")
+
+    local apply = button(panel, "Apply", 62, 24)
+    apply:SetPoint("LEFT", profitCopperSuffix, "RIGHT", 8, 0)
+    apply:SetScript("OnClick", function() self:SaveBudget() end)
+    self.planApplyButton = apply
+
+    local order = {
+        self.budgetMoneyBoxes.gold, self.budgetMoneyBoxes.silver, self.budgetMoneyBoxes.copper,
+        self.minimumProfitMoneyBoxes.gold, self.minimumProfitMoneyBoxes.silver, self.minimumProfitMoneyBoxes.copper,
+    }
+    for index, box in ipairs(order) do
+        local nextBox = order[index + 1]
+        box:SetScript("OnEnterPressed", function(value) self:SaveBudget(); value:ClearFocus() end)
+        box:SetScript("OnEscapePressed", function(value) self:LoadPlanMoneyFields(); value:ClearFocus() end)
+        box:SetScript("OnTabPressed", function(value)
+            value:ClearFocus()
+            if nextBox then nextBox:SetFocus() else self:SaveBudget() end
+        end)
+    end
+
+    self:LoadPlanMoneyFields()
 
     self.planSummary = font(panel, "GameFontHighlightSmall")
     self.planSummary:SetPoint("TOPLEFT", budgetLabel, "BOTTOMLEFT", 0, -12)
@@ -844,6 +889,7 @@ function BOD.Sidecar:SetView(view)
     if not self.panels[view] then view = "PLAN" end
     self.activeView = view
     settings().sidecarView = view
+    if view == "PLAN" then self:LoadPlanMoneyFields() end
     self:Refresh()
 end
 
@@ -866,18 +912,27 @@ end
 function BOD.Sidecar:Hide() if self.frame then self.frame:Hide() end end
 function BOD.Sidecar:Toggle() self:EnsureCreated(); if self.frame:IsShown() then self:Hide() else self:Show() end end
 
+function BOD.Sidecar:LoadPlanMoneyFields()
+    if not self.budgetMoneyBoxes or not BOD.PlanMoney then return end
+    local budget = BOD.PlanMoney:ToFields(settings().goldBudgetCopper)
+    local profit = BOD.PlanMoney:ToFields(settings().minimumExpectedProfitCopper)
+    for denomination, box in pairs(self.budgetMoneyBoxes) do box:SetText(tostring(budget[denomination] or 0)) end
+    for denomination, box in pairs(self.minimumProfitMoneyBoxes) do box:SetText(tostring(profit[denomination] or 0)) end
+end
+
 function BOD.Sidecar:SaveBudget(refresh)
-    if not self.budgetBox then return end
-    local gold = math.max(1, math.floor(tonumber(self.budgetBox:GetText()) or 0))
-    local copper = math.min(MAX_SAFE_INTEGER, gold * COPPER_PER_GOLD)
-    settings().goldBudgetCopper = copper
-    self.budgetBox:SetText(tostring(math.floor(copper / COPPER_PER_GOLD)))
-    if self.minimumProfitBox then
-        local silver = math.max(0, math.floor(tonumber(self.minimumProfitBox:GetText()) or 0))
-        settings().minimumExpectedProfitCopper = math.min(MAX_SAFE_INTEGER, silver * 100)
-        self.minimumProfitBox:SetText(tostring(math.floor(settings().minimumExpectedProfitCopper / 100)))
+    if not self.budgetMoneyBoxes or not self.minimumProfitMoneyBoxes or not BOD.PlanMoney then return end
+    local budget = BOD.PlanMoney:NormalizeFields(
+        self.budgetMoneyBoxes.gold:GetText(), self.budgetMoneyBoxes.silver:GetText(), self.budgetMoneyBoxes.copper:GetText())
+    local profit = BOD.PlanMoney:NormalizeFields(
+        self.minimumProfitMoneyBoxes.gold:GetText(), self.minimumProfitMoneyBoxes.silver:GetText(), self.minimumProfitMoneyBoxes.copper:GetText())
+    settings().goldBudgetCopper = math.min(MAX_SAFE_INTEGER, budget.totalCopper)
+    settings().minimumExpectedProfitCopper = math.min(MAX_SAFE_INTEGER, profit.totalCopper)
+    self:LoadPlanMoneyFields()
+    if refresh ~= false then
+        self:RefreshPlan()
+        self:RefreshGuide()
     end
-    if refresh ~= false then self:RefreshPlan() end
 end
 
 function BOD.Sidecar:RefreshPlan()

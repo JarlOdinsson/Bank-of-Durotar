@@ -2,6 +2,13 @@
 
 ## 0.5.0-beta.1 — Milestone A and Trades vertical slice
 
+### Plan money controls
+
+- Replaced the ambiguous Budget and Min Profit fields with separate Gold, Silver, and Copper inputs.
+- Added integer-copper decoding, overflow normalization, safe invalid-input handling, keyboard navigation, and denomination tooltips.
+- Preserved existing copper-denominated settings and kept Plan limits independent from Trades capital rules.
+- Added deterministic conversion, migration, reopening, separation, and overflow tests.
+
 ### Trades vertical slice
 
 - Added `Plan | Trades | Craft | Sell Price` navigation without replacing Plan or Best Move Now.

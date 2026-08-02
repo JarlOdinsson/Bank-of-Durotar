@@ -181,8 +181,14 @@ function BOD:InitializeDatabase()
 
     local settings = BankOfDurotarDB.settings
     settings.sidecarPosition = type(settings.sidecarPosition) == "table" and settings.sidecarPosition or copyDefaults({}, DEFAULT_DB.settings.sidecarPosition)
-    settings.goldBudgetCopper = math.max(1, math.min(2147483647, math.floor(tonumber(settings.goldBudgetCopper) or 1000000)))
-    settings.minimumExpectedProfitCopper = math.max(0, math.min(2147483647, math.floor(tonumber(settings.minimumExpectedProfitCopper) or 1000)))
+    if BOD.PlanMoney then
+        -- These fields have always been stored as copper, even when the old UI displayed only gold or silver.
+        settings.goldBudgetCopper = BOD.PlanMoney:MigrateStoredCopper(settings.goldBudgetCopper, 1000000)
+        settings.minimumExpectedProfitCopper = BOD.PlanMoney:MigrateStoredCopper(settings.minimumExpectedProfitCopper, 1000)
+    else
+        settings.goldBudgetCopper = math.max(0, math.min(2147483647, math.floor(tonumber(settings.goldBudgetCopper) or 1000000)))
+        settings.minimumExpectedProfitCopper = math.max(0, math.min(2147483647, math.floor(tonumber(settings.minimumExpectedProfitCopper) or 1000)))
+    end
     settings.searchText = nil
     settings.lastSearchText = nil
     settings.selectedSort = nil

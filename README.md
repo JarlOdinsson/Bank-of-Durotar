@@ -4,9 +4,9 @@ Bank of Durotar `0.5.0-beta.1` is a small Auction House helper for WoW Classic A
 
 ## What it does
 
-1. Enter the amount of gold you are willing to spend.
+1. Enter the Gold, Silver, and Copper you are willing to spend in Plan's Budget fields.
 2. Open the Auction House and click `SCAN MARKET`.
-3. Set the smallest profit worth pursuing (10 silver by default), then review one featured best move and up to nine additional safe flips.
+3. Set the smallest profit worth pursuing with the separate Min Profit Gold, Silver, and Copper fields (10 silver by default), then review one featured best move and up to nine additional safe flips.
 4. Open `Trades` for larger, evidence-backed commodity positions and explicitly track any position you accept.
 5. Review up to three unbound items already in your bags and their suggested sell prices.
 6. Open each profession window once, then review up to three profitable crafts.
