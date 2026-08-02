@@ -44,38 +44,14 @@ function BOD.AuctionAPI:GetFamily()
     return "unavailable"
 end
 
-function BOD.AuctionAPI:GetCapabilities()
-    local canQuery, queryDetail = self:CanQuery()
-    return {
-        family = self:GetFamily(),
-        ahOpen = self:IsAuctionHouseOpen(),
-        canQuery = canQuery,
-        queryDetail = queryDetail,
-        legacyQuery = isFunction("QueryAuctionItems"),
-        legacyCanQuery = isFunction("CanSendAuctionQuery"),
-        legacyResults = isFunction("GetAuctionItemInfo"),
-        modernAuctionHouse = type(C_AuctionHouse) == "table",
-        modernSearch = type(C_AuctionHouse) == "table" and type(C_AuctionHouse.SendSearchQuery) == "function",
-        fullScanAvailable = isFunction("QueryAuctionItems") and isFunction("CanSendAuctionQuery")
-            or (type(C_AuctionHouse) == "table" and type(C_AuctionHouse.ReplicateItems) == "function"),
-    }
-end
-
 function BOD.AuctionAPI:CanQuery()
     local family = self:GetFamily()
     if family == "legacy" then
-        if not isFunction("CanSendAuctionQuery") then
-            return false, "CanSendAuctionQuery unavailable"
-        end
-
-        local ok, canQuery, canQueryAll = pcall(CanSendAuctionQuery)
-        if not ok then
-            return false, "CanSendAuctionQuery error"
-        end
+        local canQuery, canQueryAll, detail = self:GetQueryReadiness()
         if canQuery then
             return true, "legacy query ready; full scan ready=" .. tostring(canQueryAll)
         end
-        return false, "legacy query cooldown"
+        return false, detail or "legacy query cooldown"
     end
 
     if family == "modern" then
@@ -85,21 +61,49 @@ function BOD.AuctionAPI:CanQuery()
     return false, "auction query API unavailable"
 end
 
-function BOD.AuctionAPI:SendTargetedSearch(searchText)
+function BOD.AuctionAPI:GetQueryReadiness()
+    if self:GetFamily() ~= "legacy" then
+        return false, false, "legacy Auction House API unavailable"
+    end
+    if not isFunction("CanSendAuctionQuery") then
+        return false, false, "CanSendAuctionQuery unavailable"
+    end
+
+    local ok, canQuery, canQueryAll = pcall(CanSendAuctionQuery)
+    if not ok then
+        return false, false, "CanSendAuctionQuery error"
+    end
+    return canQuery and true or false, canQueryAll == true, "queryReady=" .. tostring(canQuery) .. ", fullScanReady=" .. tostring(canQueryAll)
+end
+
+function BOD.AuctionAPI:CanFullScan()
+    local canQuery, canQueryAll, detail = self:GetQueryReadiness()
+    if canQuery and canQueryAll then
+        return true, "legacy full scan ready; fullScanReady=" .. tostring(canQueryAll)
+    end
+    return false, "legacy full scan cooldown; " .. tostring(detail)
+end
+
+function BOD.AuctionAPI:SendFullScanProbe()
     local family = self:GetFamily()
     if family ~= "legacy" then
-        return false, "Only legacy targeted queries are implemented in this milestone"
+        return false, "Only legacy full-scan probing is implemented"
     end
     if not isFunction("QueryAuctionItems") then
         return false, "QueryAuctionItems unavailable"
     end
 
-    -- Legacy Classic search. The getAll argument is explicitly false; this targeted query never performs a full scan.
-    local ok, errorMessage = pcall(QueryAuctionItems, searchText or "", nil, nil, 0, false, nil, false, false)
-    if not ok then
-        return false, tostring(errorMessage)
+    -- The 2.5.6 legacy browse frame can briefly ask for the get-all sentinel quality.
+    if type(ITEM_QUALITY_COLORS) == "table" and not ITEM_QUALITY_COLORS[-1] then
+        ITEM_QUALITY_COLORS[-1] = { r = 0, g = 0, b = 0 }
     end
-    return true, "legacy targeted query sent"
+
+    local signature = [[QueryAuctionItems("", nil, nil, 0, nil, nil, true, false, nil)]]
+    local ok, errorMessage = pcall(QueryAuctionItems, "", nil, nil, 0, nil, nil, true, false, nil)
+    if not ok then
+        return false, tostring(errorMessage), signature
+    end
+    return true, "legacy getAll probe query sent", signature
 end
 
 function BOD.AuctionAPI:GetResultCount()
@@ -149,9 +153,23 @@ function BOD.AuctionAPI:GetResult(index)
     stackCount = tonumber(stackCount) or 0
     buyoutTotal = tonumber(buyoutTotal) or 0
 
+    local infoName, itemType, itemSubType, maxStack, equipSlot, vendorPrice
+    if isFunction("GetItemInfo") then
+        local infoOk, resolvedName, _, _, _, _, resolvedType, resolvedSubType, resolvedMaxStack, resolvedEquipSlot, _, resolvedVendorPrice =
+            pcall(GetItemInfo, itemLink or tonumber(itemID))
+        if infoOk then
+            infoName = resolvedName
+            itemType = resolvedType
+            itemSubType = resolvedSubType
+            maxStack = tonumber(resolvedMaxStack)
+            equipSlot = resolvedEquipSlot
+            vendorPrice = tonumber(resolvedVendorPrice)
+        end
+    end
+
     local result = {
         index = index,
-        name = name,
+        name = name or infoName,
         itemLink = itemLink,
         itemID = tonumber(itemID) or getItemIDFromLink(itemLink),
         texture = texture,
@@ -167,6 +185,11 @@ function BOD.AuctionAPI:GetResult(index)
         timeLeft = timeLeft,
         saleStatus = saleStatus,
         hasAllInfo = hasAllInfo,
+        itemType = itemType,
+        itemSubType = itemSubType,
+        maxStack = maxStack,
+        equipSlot = equipSlot,
+        vendorPrice = vendorPrice,
     }
 
     if buyoutTotal > 0 and stackCount > 0 then
