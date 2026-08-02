@@ -187,6 +187,7 @@ function BOD.CraftingService:GetRecommendations(limit, budgetCopper)
                         owner = profession.owner,
                         recipeName = recipe.name,
                         outputName = recipe.outputName,
+                        outputItemID = recipe.outputItemID,
                         outputCount = outputCount,
                         reagentCost = reagentCost,
                         sellPrice = supportedSalePrice,

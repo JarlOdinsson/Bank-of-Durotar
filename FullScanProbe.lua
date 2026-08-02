@@ -510,6 +510,10 @@ function BOD.FullScanProbe:Finish(state, errorMessage)
         if snapshot and BOD.MarketHistory and BOD.MarketHistory.RecordSnapshot then
             BOD.MarketHistory:RecordSnapshot(snapshot)
         end
+        if snapshot and BOD.TradeService then
+            BOD.TradeService:Invalidate()
+            BOD.TradeService:Build()
+        end
     elseif BOD.MarketData then
         BOD.MarketData:AbortSnapshot(errorMessage or state)
     end

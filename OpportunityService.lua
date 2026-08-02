@@ -52,24 +52,29 @@ local function confidencePenalty(value)
     return 100
 end
 
-local function buildOpportunity(itemKey, item, snapshotTimestamp)
+local function buildOpportunity(itemKey, item, snapshot, filters, context)
     if not validCopper(item.lowestUnitBuyout) or not validCopper(item.medianUnitBuyout) then
-        return nil
+        return nil, "INVALID_DATA"
     end
 
     local historySummary = BOD.MarketHistory and BOD.MarketHistory.GetSummary and BOD.MarketHistory:GetSummary(itemKey) or nil
-    local observationCount = tonumber(historySummary and historySummary.observationCount) or 0
+    local sharedAnalysis = BOD.MarketAnalysis and BOD.MarketAnalysis:Analyze(itemKey, item, snapshot, {
+        ownedQuantities = context and context.ownedQuantities,
+    }) or nil
+    local observationCount = tonumber(sharedAnalysis and sharedAnalysis.observationCount)
+        or tonumber(historySummary and historySummary.observationCount) or 0
     local hasHistory = observationCount >= 2
     local scanReference = math.max(tonumber(item.weightedMedianUnitBuyout) or 0, tonumber(item.medianUnitBuyout) or 0)
     local historicalMedian = hasHistory and historySummary.sevenDay and tonumber(historySummary.sevenDay.median) or nil
-    local reference = historicalMedian and historicalMedian > 0 and math.min(scanReference, historicalMedian) or scanReference
+    local reference = tonumber(sharedAnalysis and sharedAnalysis.supportedMarketValue)
+        or (historicalMedian and historicalMedian > 0 and math.min(scanReference, historicalMedian) or scanReference)
     local current = tonumber(item.lowestUnitBuyout) or 0
     local availableQuantity = math.max(1, math.floor(tonumber(item.bestListingStackCount) or 1))
     local economics = BOD.PricingService:GetSaleEconomics(itemKey, availableQuantity, reference * availableQuantity)
     local estimatedNetResalePerUnit = math.floor(economics.expectedNetSale / availableQuantity)
     local maximumSafeUnitPrice = math.floor(estimatedNetResalePerUnit - (reference * MINIMUM_MARGIN_RATE))
     if reference <= current or current > maximumSafeUnitPrice or estimatedNetResalePerUnit <= current then
-        return nil
+        return nil, "PRICE_ABOVE_SAFE_LIMIT"
     end
 
     local quantity = tonumber(item.totalQuantity) or 0
@@ -80,11 +85,11 @@ local function buildOpportunity(itemKey, item, snapshotTimestamp)
     local estimatedTotalUpside = upsidePerUnit * availableQuantity
     local confidenceValue = confidence(sampleCount, listings, hasHistory)
     if confidenceValue == "NONE" then
-        return nil
+        return nil, "INSUFFICIENT_DATA"
     end
     local personalSales = economics.personalSales or {}
     if (tonumber(personalSales.outcomeCount) or 0) >= 3 and (tonumber(personalSales.saleRate) or 0) < 0.25 then
-        return nil
+        return nil, "POOR_PERSONAL_SALES"
     end
 
     local deviation = reference > 0 and (upsidePerUnit / reference) or 0
@@ -119,8 +124,47 @@ local function buildOpportunity(itemKey, item, snapshotTimestamp)
     local historicalReference = historicalMedian or reference
     historicalReference = tonumber(historicalReference) or reference
 
+    local grossSale = math.floor(reference * availableQuantity)
+    local relistFailures = outcomeCount >= 3 and (tonumber(personalSales.saleRate) or 0) >= 0.75 and 1 or 2
+    local conservativeDepositLoss = math.floor((tonumber(economics.deposit) or 0) * relistFailures)
+    local conservativeNetSale = math.max(0, grossSale - (tonumber(economics.auctionCut) or 0) - conservativeDepositLoss)
+    local conservativeNetProfit = conservativeNetSale - capitalRequired
+    local ownedQuantity = tonumber(context and context.ownedQuantities and context.ownedQuantities[itemKey]) or 0
+    local dataAgeSeconds = tonumber(sharedAnalysis and sharedAnalysis.dataAgeSeconds)
+        or math.max(0, (type(time) == "function" and time() or os.time()) - (tonumber(snapshot.observationTimestamp or snapshot.completedAt) or 0))
+    local policy = BOD.QuickMovePolicy:Evaluate({
+        currentUnitPrice = current,
+        maximumSafeUnitPrice = maximumSafeUnitPrice,
+        expectedNetProfit = estimatedTotalUpside,
+        conservativeNetProfit = conservativeNetProfit,
+        purchaseQuantity = availableQuantity,
+        capitalRequired = capitalRequired,
+        dataAgeSeconds = dataAgeSeconds,
+        confidence = confidenceValue,
+        historyObservationCount = observationCount,
+        historyDayCount = tonumber(historySummary and historySummary.dayCount) or 0,
+        listingCount = listings,
+        sampleCount = sampleCount,
+        totalMarketQuantity = quantity,
+        ownedQuantity = ownedQuantity,
+        referenceUnitPrice = reference,
+        grossSale = grossSale,
+        estimatedDeposit = economics.deposit,
+        expectedNetSale = economics.expectedNetSale,
+        vendorValue = economics.vendorValue,
+        demand = sharedAnalysis and sharedAnalysis.demand or "UNKNOWN",
+        relistFailuresModeled = relistFailures,
+    }, {
+        minimumExpectedProfitCopper = filters.minimumExpectedProfitCopper,
+        maximumAgeSeconds = filters.maximumAgeSeconds,
+        maximumQuickCapitalCopper = filters.maximumCapitalRequired,
+        maximumQuickQuantity = filters.maximumQuickQuantity or 20,
+    })
+    if not policy.actionable then return nil, policy.rejectionCode, policy end
+
     return {
         itemKey = itemKey,
+        itemID = item.itemID,
         itemName = item.itemName or item.name,
         category = hasHistory and "BELOW_RECENT_VALUE" or "CHEAPEST_LISTING_BELOW_MARKET",
         score = score,
@@ -129,6 +173,12 @@ local function buildOpportunity(itemKey, item, snapshotTimestamp)
         flipScore = flipScore,
         profitRate = profitRate,
         confidence = confidenceValue,
+        demand = sharedAnalysis and sharedAnalysis.demand or "UNKNOWN",
+        marketConfidence = sharedAnalysis and sharedAnalysis.confidence or nil,
+        stabilityRate = sharedAnalysis and sharedAnalysis.stabilityRate or nil,
+        trustLabel = policy.trustLabel,
+        mainRiskCode = policy.mainRiskCode,
+        mainRisk = policy.mainRisk,
         currentUnitPrice = current,
         historicalReferencePrice = historicalReference,
         historyObservationCount = observationCount,
@@ -142,6 +192,11 @@ local function buildOpportunity(itemKey, item, snapshotTimestamp)
         estimatedNetResalePerUnit = estimatedNetResalePerUnit,
         estimatedUpsidePerUnit = upsidePerUnit,
         estimatedTotalUpside = estimatedTotalUpside,
+        conservativeNetProfit = conservativeNetProfit,
+        conservativeNetSale = conservativeNetSale,
+        conservativeDepositLoss = conservativeDepositLoss,
+        relistFailuresModeled = relistFailures,
+        grossSale = grossSale,
         availableQuantity = availableQuantity,
         currentQuantity = availableQuantity,
         totalMarketQuantity = quantity,
@@ -151,7 +206,12 @@ local function buildOpportunity(itemKey, item, snapshotTimestamp)
         personalExpiredCount = tonumber(personalSales.expiredCount) or 0,
         personalOutcomeCount = outcomeCount,
         personalSaleRate = personalSales.saleRate,
-        dataAgeSeconds = math.max(0, (type(time) == "function" and time() or os.time()) - (tonumber(snapshotTimestamp) or 0)),
+        ownedQuantity = ownedQuantity,
+        recommendedPurchaseQuantity = policy.recommendedPurchaseQuantity,
+        dataAgeSeconds = dataAgeSeconds,
+        recommendationTimestamp = type(time) == "function" and time() or os.time(),
+        snapshotId = snapshot.scanId or snapshot.id,
+        observedUnitPrice = current,
         reasonCodes = reasons,
         explanation = {
             "The cheapest listings are at least 15% below the local reference price.",
@@ -181,43 +241,59 @@ function BOD.OpportunityService:FindOpportunities(filters, context)
     end
 
     local opportunities = {}
+    local rejectionCounts = {}
+    local function reject(code)
+        code = tostring(code or "INVALID_DATA")
+        rejectionCounts[code] = (rejectionCounts[code] or 0) + 1
+    end
     for itemKey, item in pairs(snapshot.items) do
-        local opportunity = buildOpportunity(itemKey, item, snapshot.observationTimestamp or snapshot.completedAt)
+        local opportunity, rejectionCode = buildOpportunity(itemKey, item, snapshot, filters, context)
         if opportunity
             and opportunity.opportunityScore >= minScore
             and opportunity.capitalRequired <= maxCapital
-            and opportunity.estimatedTotalUpside >= minUpside
+            and opportunity.conservativeNetProfit >= minUpside
             and (CONFIDENCE_RANK[opportunity.confidence] or 0) >= minimumRank
             and (includeLowSample or opportunity.confidence ~= "LOW")
         then
             opportunities[#opportunities + 1] = opportunity
+        elseif opportunity and opportunity.capitalRequired > maxCapital then
+            reject("BUDGET_TOO_LOW")
+        elseif opportunity then
+            reject("INSUFFICIENT_DATA")
+        else
+            reject(rejectionCode)
         end
     end
 
     table.sort(opportunities, function(left, right)
-        local leftRank = CONFIDENCE_RANK[left.confidence] or 0
-        local rightRank = CONFIDENCE_RANK[right.confidence] or 0
-        if left.flipScore ~= right.flipScore then
-            return left.flipScore > right.flipScore
-        elseif leftRank ~= rightRank then
-            return leftRank > rightRank
-        elseif left.opportunityScore ~= right.opportunityScore then
-            return left.opportunityScore > right.opportunityScore
-        elseif left.estimatedTotalUpside ~= right.estimatedTotalUpside then
-            return left.estimatedTotalUpside > right.estimatedTotalUpside
-        end
-        return tostring(left.itemName or left.itemKey) < tostring(right.itemName or right.itemKey)
+        return BOD.RecommendationPolicy:IsBetterOpportunity(left, right)
     end)
 
     while #opportunities > limit do
         table.remove(opportunities)
     end
 
+    local primaryRejectionCode, primaryCount
+    for code, count in pairs(rejectionCounts) do
+        if not primaryCount or count > primaryCount or (count == primaryCount and code < primaryRejectionCode) then
+            primaryRejectionCode, primaryCount = code, count
+        end
+    end
     return {
         status = #opportunities > 0 and "OK" or "EMPTY",
         opportunities = opportunities,
         resultCount = #opportunities,
         snapshotId = snapshot.scanId or snapshot.id,
+        rejectionCounts = rejectionCounts,
+        primaryRejectionCode = primaryRejectionCode,
+        primaryRejectionReason = primaryRejectionCode and BOD.QuickMovePolicy:GetReasonText(primaryRejectionCode) or nil,
         explanation = "Results are estimated opportunities only, not guaranteed profit.",
     }
+end
+
+function BOD.OpportunityService:CheckRecommendationFreshness(recommendation)
+    local snapshot = BOD.MarketData and BOD.MarketData:GetLatestSnapshot() or nil
+    local item = recommendation and BOD.MarketData and BOD.MarketData:GetCurrentItem(recommendation.itemKey) or nil
+    local currentTime = type(time) == "function" and time() or os.time()
+    return BOD.RecommendationPolicy:CheckFreshness(recommendation, item, snapshot, currentTime, 86400)
 end

@@ -67,10 +67,8 @@ local function findBagMarketItem(details)
     return itemString and BOD.MarketData:GetCurrentItem("itemString:" .. itemString) or nil
 end
 
-function BOD.GoldPlan:GetBagSellCandidates(limit)
-    limit = math.max(1, math.min(wholeNumber(limit) or SELL_LIMIT, 20))
+function BOD.GoldPlan:CollectBagInventory()
     local owned = {}
-
     for bag = BAG_FIRST, BAG_LAST do
         for slot = 1, getBagSlots(bag) do
             local bagItem = getBagItem(bag, slot)
@@ -82,8 +80,10 @@ function BOD.GoldPlan:GetBagSellCandidates(limit)
                     if not entry then
                         entry = {
                             itemKey = marketItem.itemKey,
+                            itemID = bagItem.itemID or marketItem.itemID,
                             itemName = details.name,
                             itemLink = details.link,
+                            texture = details.texture,
                             maxStack = details.maxStack,
                             vendorUnitPrice = details.vendorPrice,
                             ownedQuantity = 0,
@@ -95,7 +95,12 @@ function BOD.GoldPlan:GetBagSellCandidates(limit)
             end
         end
     end
+    return owned
+end
 
+function BOD.GoldPlan:GetBagSellCandidates(limit, owned)
+    limit = math.max(1, math.min(wholeNumber(limit) or SELL_LIMIT, 20))
+    owned = type(owned) == "table" and owned or self:CollectBagInventory()
     local candidates = {}
     for _, entry in pairs(owned) do
         local stackCount = math.min(entry.ownedQuantity, entry.maxStack)
@@ -128,18 +133,26 @@ function BOD.GoldPlan:GetBagSellCandidates(limit)
     return candidates
 end
 
-function BOD.GoldPlan:Build(budgetCopper)
+function BOD.GoldPlan:Build(budgetCopper, options)
+    options = type(options) == "table" and options or {}
     budgetCopper = wholeNumber(budgetCopper)
     if not budgetCopper or budgetCopper <= 0 then
         return { status = "INVALID_BUDGET", budgetCopper = 0, buys = {}, sells = {} }
     end
 
     local perItemLimit = math.max(1, math.floor(budgetCopper * 0.5))
+    local ownedInventory = self:CollectBagInventory()
+    local ownedQuantities = {}
+    for itemKey, entry in pairs(ownedInventory) do ownedQuantities[itemKey] = wholeNumber(entry.ownedQuantity) or 0 end
+    local minimumProfit = wholeNumber(options.minimumExpectedProfitCopper)
+        or (BOD.db and BOD.db.settings and wholeNumber(BOD.db.settings.minimumExpectedProfitCopper)) or 1000
     local result = BOD.OpportunityService:FindOpportunities({
         limit = 25,
         minimumConfidence = "MEDIUM",
-        maximumCapitalRequired = perItemLimit,
-    })
+        maximumCapitalRequired = math.min(perItemLimit, 200000),
+        minimumExpectedProfitCopper = minimumProfit,
+        maximumAgeSeconds = 86400,
+    }, { ownedQuantities = ownedQuantities })
     local buys = {}
     local remaining = budgetCopper
     for _, opportunity in ipairs(result.opportunities or {}) do
@@ -151,13 +164,26 @@ function BOD.GoldPlan:Build(budgetCopper)
         end
     end
 
+    local status = result.status == "NO_DATA" and "NO_DATA" or (#buys > 0 and "OK" or "EMPTY")
+    local largerTrade
+    local cachedTrades = BOD.TradeService and BOD.TradeService:GetCachedResult() or nil
+    for _, trade in ipairs(cachedTrades and cachedTrades.opportunities or {}) do
+        if trade.tradeEligible and not trade.quickMoveEligible then largerTrade = trade; break end
+    end
     return {
-        status = result.status == "NO_DATA" and "NO_DATA" or "OK",
+        status = status,
         budgetCopper = budgetCopper,
         investedCopper = budgetCopper - remaining,
         remainingCopper = remaining,
         perItemLimit = perItemLimit,
+        minimumExpectedProfitCopper = minimumProfit,
         buys = buys,
-        sells = self:GetBagSellCandidates(SELL_LIMIT),
+        bestMove = buys[1],
+        largerTradeAvailable = largerTrade ~= nil,
+        largerTrade = largerTrade,
+        primaryRejectionCode = result.primaryRejectionCode,
+        primaryRejectionReason = result.primaryRejectionReason,
+        ownedQuantities = ownedQuantities,
+        sells = self:GetBagSellCandidates(SELL_LIMIT, ownedInventory),
     }
 end

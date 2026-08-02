@@ -116,16 +116,14 @@ function BOD.MinimapButton:EnsureCreated()
     button:SetScript("OnDragStart", function()
         self.isDragging = true
         self:HideMenu()
+        button:SetScript("OnUpdate", function()
+            self:UpdatePositionFromCursor()
+        end)
     end)
 
     button:SetScript("OnDragStop", function()
         self.isDragging = false
-    end)
-
-    button:SetScript("OnUpdate", function()
-        if self.isDragging then
-            self:UpdatePositionFromCursor()
-        end
+        button:SetScript("OnUpdate", nil)
     end)
 
     button:SetScript("OnEnter", function()

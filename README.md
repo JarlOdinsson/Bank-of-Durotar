@@ -1,16 +1,17 @@
 # Bank of Durotar
 
-Bank of Durotar `0.4.0` is a small Auction House helper for WoW Classic Anniversary.
+Bank of Durotar `0.5.0-beta.1` is a small Auction House helper for WoW Classic Anniversary.
 
 ## What it does
 
 1. Enter the amount of gold you are willing to spend.
 2. Open the Auction House and click `SCAN MARKET`.
-3. Review up to ten ranked items to flip that fit the budget.
-4. Review up to three unbound items already in your bags and their suggested sell prices.
-5. Open each profession window once, then review up to three profitable crafts.
+3. Set the smallest profit worth pursuing (10 silver by default), then review one featured best move and up to nine additional safe flips.
+4. Open `Trades` for larger, evidence-backed commodity positions and explicitly track any position you accept.
+5. Review up to three unbound items already in your bags and their suggested sell prices.
+6. Open each profession window once, then review up to three profitable crafts.
 
-The addon stores the latest market snapshot plus compact daily averages for up to 1,000 active items over 30 days. Repeated scans build the historical baseline used to judge buys and protect craft estimates from one-scan price spikes. It also learns successful and expired auctions whenever you open your mailbox, then uses that personal sale rate to demote items that do not sell for you. The UI shows scans learned, days observed, and tracked items without exposing database details. Each buy suggestion is one exact cheapest stack. The scrollable list ranks up to ten candidates by estimated flip ease using price confidence, repeated observations, current market depth, return on gold spent, and personal sold-versus-expired history. No single buy can use more than half the budget, and the whole plan cannot exceed the budget. Craft estimates use conservative material prices, known cooldown availability, and require at least a 15% estimated margin. Estimates include the 5% Auction House cut, expected deposit losses, and vendor-value comparisons, but future prices can never be guaranteed. Buying, selling, vending, and crafting remain manual.
+The addon stores the latest market snapshot plus compact daily averages for up to 1,000 active items over 30 days. Repeated scans build the historical baseline used to judge buys and protect estimates from one-scan spikes. Plan remains the quick workflow. Trades uses stronger multi-day evidence, actual character gold, a reserve, controlled exposure, supported exit ranges, and low/normal profit ranges for exact stackable commodity listings. A recommendation becomes an open trade only when `Track Trade` is clicked. Purchase batches, listings, sales, closing, and abandonment are recorded manually; current market value is never called realized profit. The addon also learns successful and expired auctions whenever the mailbox is opened. Buying, selling, vending, crafting, and all protected actions remain manual.
 
 ## Commands
 
@@ -18,6 +19,7 @@ The addon stores the latest market snapshot plus compact daily averages for up t
 /bod                 Open the addon
 /bod scan            Scan the market
 /bod buy             Show the Gold Plan
+/bod trades          Show larger tracked trade opportunities
 /bod sell            Show sell-price advice
 /bod craft           Show profitable known crafts
 /bod minimap show    Show the minimap button
@@ -37,6 +39,10 @@ Open the Auction House and confirm:
 - `SCAN MARKET` starts exactly one scan or clearly shows Blizzard's cooldown.
 - A completed scan opens `Gold Plan` with the saved budget.
 - The plan shows no more than ten ranked buys and their combined cost never exceeds the budget.
+- The first buy is visually featured and shows icon/name, exact quantity, owned count, maximum price, conservative profit, trust, main risk, and latest-scan wording.
+- Guided mode changes with Auction House, scan, Plan, Craft, and Sell states and can always be turned off.
+- Navigation reads `Plan | Trades | Craft | Sell Price`; Trades shows actual liquid gold, reserve, available/committed capital, one best trade, two secondary trades, open trades, and history.
+- Tracking a trade performs no purchase. Multiple manual purchase batches produce a weighted cost basis, and manual partial sales preserve remaining basis.
 - No individual suggested buy costs more than half the budget.
 - Bag suggestions show no more than three unbound items with quantities and prices; single-item gear requires an exact variant match.
 - Opening each profession teaches the addon its currently visible known recipes.
@@ -45,4 +51,4 @@ Open the Auction House and confirm:
 - `Sell Price` accepts a typed or shift-clicked item and returns a price or a clear no-data message.
 - No Lua error, taint warning, disconnect, automatic purchase, or automatic listing occurs.
 
-This release targets the verified legacy Auction House API on Classic Anniversary interface `20506` (client 2.5.6). The scanner has completed a live full-market scan on that client. Version `0.4.0` keeps the compact daily market history and adds bounded personal mailbox outcome history.
+This beta targets the verified legacy Auction House API on Classic Anniversary interface `20506` (client 2.5.6). The scanner completed a live full-market scan on that client before the Trades work; the new `0.5.0-beta.1` Trades UI and lifecycle still require in-game validation.

@@ -1,12 +1,12 @@
 local addonName, BOD = ...
 
 BOD.addonName = addonName
-BOD.version = "0.4.0"
+BOD.version = "0.5.0-beta.1"
 BOD.db = nil
 BOD.lastError = nil
 
 local DEFAULT_DB = {
-    schemaVersion = 11,
+    schemaVersion = 12,
     marketData = {
         schemaVersion = 3,
         latestSnapshotID = nil,
@@ -38,6 +38,27 @@ local DEFAULT_DB = {
         items = {},
         mailboxCounts = {},
     },
+    trading = {
+        schemaVersion = 1,
+        nextTradeId = 1,
+        openTrades = {},
+        closedTrades = {},
+        settings = {
+            enabled = true,
+            riskMode = "BALANCED",
+            emergencyReserveCopper = 0,
+            maximumCapitalPerTradeCopper = 0,
+            maximumTotalCapitalCommittedCopper = 0,
+            maxOpenTrades = 5,
+            minimumAbsoluteProfitCopper = 5000,
+            minimumDiscountPercent = 15,
+            minimumDemand = "ACTIVE",
+            minimumConfidence = "FAIR",
+            minimumObservationCount = 5,
+            showSpeculativeTrades = false,
+            tradeHistoryRetention = 50,
+        },
+    },
     settings = {
         minimap = {
             hidden = false,
@@ -50,6 +71,7 @@ local DEFAULT_DB = {
         guidedMode = false,
         guidedStep = 1,
         goldBudgetCopper = 1000000,
+        minimumExpectedProfitCopper = 1000,
         sidecarPosition = {
             point = "CENTER",
             relativePoint = "CENTER",
@@ -80,7 +102,7 @@ end
 
 function BOD:InitializeDatabase()
     BankOfDurotarDB = copyDefaults(type(BankOfDurotarDB) == "table" and BankOfDurotarDB or {}, DEFAULT_DB)
-    BankOfDurotarDB.schemaVersion = 11
+    BankOfDurotarDB.schemaVersion = 12
 
     -- Remove data used only by the retired developer probes.
     BankOfDurotarDB.diagnostics = nil
@@ -134,9 +156,33 @@ function BOD:InitializeDatabase()
     salesHistory.items = type(salesHistory.items) == "table" and salesHistory.items or {}
     salesHistory.mailboxCounts = type(salesHistory.mailboxCounts) == "table" and salesHistory.mailboxCounts or {}
 
+    local trading = BankOfDurotarDB.trading
+    trading.schemaVersion = 1
+    trading.nextTradeId = math.max(1, math.floor(tonumber(trading.nextTradeId) or 1))
+    trading.openTrades = type(trading.openTrades) == "table" and trading.openTrades or {}
+    trading.closedTrades = type(trading.closedTrades) == "table" and trading.closedTrades or {}
+    trading.settings = copyDefaults(type(trading.settings) == "table" and trading.settings or {}, DEFAULT_DB.trading.settings)
+    local tradeSettings = trading.settings
+    local validModes = { CONSERVATIVE = true, BALANCED = true, AGGRESSIVE = true }
+    local validDemand = { UNKNOWN = true, SLOW = true, ACTIVE = true, HOT = true }
+    local validConfidence = { SPECULATIVE = true, FAIR = true, STRONG = true }
+    tradeSettings.riskMode = validModes[tostring(tradeSettings.riskMode):upper()] and tostring(tradeSettings.riskMode):upper() or "BALANCED"
+    tradeSettings.minimumDemand = validDemand[tostring(tradeSettings.minimumDemand):upper()] and tostring(tradeSettings.minimumDemand):upper() or "ACTIVE"
+    tradeSettings.minimumConfidence = validConfidence[tostring(tradeSettings.minimumConfidence):upper()] and tostring(tradeSettings.minimumConfidence):upper() or "FAIR"
+    tradeSettings.enabled = tradeSettings.enabled ~= false
+    tradeSettings.showSpeculativeTrades = tradeSettings.showSpeculativeTrades == true
+    for _, key in ipairs({ "emergencyReserveCopper", "maximumCapitalPerTradeCopper", "maximumTotalCapitalCommittedCopper", "minimumAbsoluteProfitCopper" }) do
+        tradeSettings[key] = math.max(0, math.min(2147483647, math.floor(tonumber(tradeSettings[key]) or 0)))
+    end
+    tradeSettings.maxOpenTrades = math.max(1, math.min(5, math.floor(tonumber(tradeSettings.maxOpenTrades) or 5)))
+    tradeSettings.minimumDiscountPercent = math.max(0, math.min(90, math.floor(tonumber(tradeSettings.minimumDiscountPercent) or 15)))
+    tradeSettings.minimumObservationCount = math.max(1, math.min(30, math.floor(tonumber(tradeSettings.minimumObservationCount) or 5)))
+    tradeSettings.tradeHistoryRetention = math.max(1, math.min(500, math.floor(tonumber(tradeSettings.tradeHistoryRetention) or 50)))
+
     local settings = BankOfDurotarDB.settings
     settings.sidecarPosition = type(settings.sidecarPosition) == "table" and settings.sidecarPosition or copyDefaults({}, DEFAULT_DB.settings.sidecarPosition)
     settings.goldBudgetCopper = math.max(1, math.min(2147483647, math.floor(tonumber(settings.goldBudgetCopper) or 1000000)))
+    settings.minimumExpectedProfitCopper = math.max(0, math.min(2147483647, math.floor(tonumber(settings.minimumExpectedProfitCopper) or 1000)))
     settings.searchText = nil
     settings.lastSearchText = nil
     settings.selectedSort = nil
@@ -213,6 +259,9 @@ function BOD:HandleSlashCommand(input)
     elseif command == "buy" or command == "opportunities" then
         self.Sidecar:Show()
         self.Sidecar:SetView("PLAN")
+    elseif command == "trades" or command == "trade" then
+        self.Sidecar:Show()
+        self.Sidecar:SetView("TRADES")
     elseif command == "sell" or command == "sellprice" then
         self.Sidecar:Show()
         self.Sidecar:SetView("SELL")
@@ -226,7 +275,7 @@ function BOD:HandleSlashCommand(input)
     elseif command == "minimap reset" then
         self.MinimapButton:ResetPosition()
     elseif command == "help" then
-        self:Print("/bod - open | /bod scan | /bod buy | /bod sell | /bod craft")
+        self:Print("/bod - open | /bod scan | /bod buy | /bod trades | /bod sell | /bod craft")
         self:Print("/bod minimap show|hide|reset")
     else
         self:Print("Unknown command. Use /bod help.")
@@ -258,6 +307,7 @@ for _, eventName in ipairs({
     "AUCTION_HOUSE_CLOSED",
     "AUCTION_ITEM_LIST_UPDATE",
     "BAG_UPDATE_DELAYED",
+    "PLAYER_MONEY",
     "GET_ITEM_INFO_RECEIVED",
     "TRADE_SKILL_SHOW",
     "TRADE_SKILL_UPDATE",

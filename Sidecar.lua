@@ -10,6 +10,9 @@ BOD.Sidecar = {
     craftRows = {},
     selectedItemKey = nil,
     selectedItemLink = nil,
+    selectedTradeId = nil,
+    selectedTradeRecommendation = nil,
+    tradeActionStatus = nil,
 }
 
 local WIDTH, HEIGHT = 520, 640
@@ -17,16 +20,6 @@ local BUY_ROWS, SELL_ROWS, CRAFT_ROWS = 10, 3, 3
 local GUIDED_HEIGHT = 716
 local COPPER_PER_GOLD = 10000
 local MAX_SAFE_INTEGER = 2147483647
-local GUIDE_STEPS = {
-    { view = "PLAN", title = "WELCOME", text = "This guide will show you exactly what to click. Use Back and Next whenever you need them." },
-    { view = "PLAN", title = "SET YOUR BUDGET", text = "Type how much gold you can spend in the Budget box, then click Apply." },
-    { view = "PLAN", title = "SCAN THE MARKET", text = "Open the Auction House and click Scan Market. Wait while Bank of Durotar learns the prices." },
-    { view = "PLAN", title = "BUY", text = "Under Items to Buy, search the exact item name in Blizzard's Auction House. Never pay more than the shown limit." },
-    { view = "PLAN", title = "SELL FROM YOUR BAGS", text = "Under Items to Sell, use the shown stack size and price. Put those numbers into Blizzard's sell window." },
-    { view = "SELL", title = "PRICE ANY ITEM", text = "Drag an item from your bags into the big box. Type how many you are selling, then copy the price in step 3." },
-    { view = "CRAFT", title = "CRAFT FOR PROFIT", text = "Open each profession once. After a market scan, this tab shows crafts that may make gold." },
-    { view = "PLAN", title = "YOU ARE READY", text = "That is the whole loop: set a budget, scan, follow the safe suggestions, and always buy and sell manually." },
-}
 
 local function settings()
     if not BOD.db then BOD:InitializeDatabase() end
@@ -54,7 +47,7 @@ local function sectionLabel(parent, label)
     return value
 end
 
-local function recommendationRow(parent, height, width)
+local function recommendationRow(parent, height, width, withIcon)
     local template = BackdropTemplateMixin and "BackdropTemplate" or nil
     local container = CreateFrame("Frame", nil, parent, template)
     container:SetSize(width or 475, height)
@@ -64,7 +57,31 @@ local function recommendationRow(parent, height, width)
     end
 
     local value = font(container, "GameFontHighlightSmall")
-    value:SetPoint("TOPLEFT", 10, -7)
+    if withIcon then
+        value.icon = container:CreateTexture(nil, "ARTWORK")
+        value.icon:SetSize(36, 36)
+        value.icon:SetPoint("LEFT", 8, 0)
+        value.icon:SetTexture("Interface\\Icons\\INV_Misc_QuestionMark")
+        value:SetPoint("TOPLEFT", value.icon, "TOPRIGHT", 9, -1)
+        container:EnableMouse(true)
+        container:SetScript("OnEnter", function()
+            if GameTooltip and (value.itemLink or value.helpLines) then
+                GameTooltip:SetOwner(container, "ANCHOR_LEFT")
+                if value.itemLink then
+                    GameTooltip:SetHyperlink(value.itemLink)
+                else
+                    GameTooltip:SetText(value.helpTitle or "Bank of Durotar")
+                end
+                for _, line in ipairs(value.helpLines or {}) do
+                    GameTooltip:AddLine(line, 1, 1, 1, true)
+                end
+                GameTooltip:Show()
+            end
+        end)
+        container:SetScript("OnLeave", function() if GameTooltip then GameTooltip:Hide() end end)
+    else
+        value:SetPoint("TOPLEFT", 10, -7)
+    end
     value:SetPoint("BOTTOMRIGHT", -8, 5)
     value.container = container
     return value
@@ -74,6 +91,24 @@ local function setRow(row, text)
     text = tostring(text or "")
     row:SetText(text)
     if text == "" then row.container:Hide() else row.container:Show() end
+end
+
+local function setRowIcon(row, itemID, knownItemLink)
+    if not row.icon then return end
+    local texture, itemLink = nil, knownItemLink
+    if itemID and type(GetItemIcon) == "function" then texture = GetItemIcon(itemID) end
+    if itemID and type(GetItemInfo) == "function" then
+        local cachedLink = select(2, GetItemInfo(itemID))
+        if cachedLink then itemLink = cachedLink end
+        if not texture then texture = select(10, GetItemInfo(itemID)) end
+    end
+    row.itemLink = itemLink
+    row.icon:SetTexture(texture or "Interface\\Icons\\INV_Misc_QuestionMark")
+end
+
+local function setRowHelp(row, title, lines)
+    row.helpTitle = title
+    row.helpLines = lines
 end
 
 local function cursorItemLink()
@@ -118,6 +153,11 @@ local function ageLabel(seconds)
     return tostring(math.floor(seconds / 86400)) .. "d"
 end
 
+local function trustLabel(value)
+    local labels = { STRONG = "Strong", FAIR = "Fair", SPECULATIVE = "Speculative", AVOID = "Avoid" }
+    return labels[tostring(value or "AVOID"):upper()] or "Avoid"
+end
+
 local function marketMemoryLabel()
     local memory = BOD.MarketHistory and BOD.MarketHistory.GetLearningStatus and BOD.MarketHistory:GetLearningStatus() or {}
     local sales = BOD.SalesHistory and BOD.SalesHistory.GetLearningStatus and BOD.SalesHistory:GetLearningStatus() or {}
@@ -155,30 +195,53 @@ function BOD.Sidecar:CreatePlanPanel(frame, anchor)
     apply:SetPoint("LEFT", goldLabel, "RIGHT", 12, 0)
     apply:SetScript("OnClick", function() self:SaveBudget() end)
 
+    local minimumLabel = font(panel, "GameFontNormalSmall")
+    minimumLabel:SetPoint("LEFT", apply, "RIGHT", 12, 0)
+    minimumLabel:SetText("Min profit")
+    self.minimumProfitBox = CreateFrame("EditBox", nil, panel, "InputBoxTemplate")
+    self.minimumProfitBox:SetSize(55, 24)
+    self.minimumProfitBox:SetPoint("LEFT", minimumLabel, "RIGHT", 8, 0)
+    self.minimumProfitBox:SetAutoFocus(false)
+    self.minimumProfitBox:SetNumeric(true)
+    self.minimumProfitBox:SetText(tostring(math.floor((settings().minimumExpectedProfitCopper or 1000) / 100)))
+    self.minimumProfitBox:SetScript("OnEnterPressed", function(box) self:SaveBudget(); box:ClearFocus() end)
+    local silverLabel = font(panel, "GameFontNormalSmall")
+    silverLabel:SetPoint("LEFT", self.minimumProfitBox, "RIGHT", 5, 0)
+    silverLabel:SetText("silver")
+
     self.planSummary = font(panel, "GameFontHighlightSmall")
     self.planSummary:SetPoint("TOPLEFT", budgetLabel, "BOTTOMLEFT", 0, -12)
     self.planSummary:SetSize(475, 30)
 
-    local buyHeader = sectionLabel(panel, "BUY These Auction Items — Top Flips (scroll for up to 10)")
-    buyHeader:SetPoint("TOPLEFT", self.planSummary, "BOTTOMLEFT", 0, -8)
+    local bestHeader = sectionLabel(panel, "BEST MOVE NOW")
+    bestHeader:SetPoint("TOPLEFT", self.planSummary, "BOTTOMLEFT", 0, -8)
+    self.viewTradeButton = button(panel, "View Trade", 92, 20)
+    self.viewTradeButton:SetPoint("LEFT", bestHeader, "LEFT", 380, 0)
+    self.viewTradeButton:SetScript("OnClick", function() self:SetView("TRADES") end)
+    self.viewTradeButton:Hide()
+    self.bestMoveRow = recommendationRow(panel, 82, 475, true)
+    self.bestMoveRow.container:SetPoint("TOPLEFT", bestHeader, "BOTTOMLEFT", 0, -7)
+
+    local buyHeader = sectionLabel(panel, "MORE SAFE FLIPS")
+    buyHeader:SetPoint("TOPLEFT", self.bestMoveRow.container, "BOTTOMLEFT", 0, -8)
     local buyScroll = CreateFrame("ScrollFrame", nil, panel, "UIPanelScrollFrameTemplate")
     self.buyScroll = buyScroll
     buyScroll:SetPoint("TOPLEFT", buyHeader, "BOTTOMLEFT", 0, -7)
-    buyScroll:SetSize(462, 144)
+    buyScroll:SetSize(462, 92)
     buyScroll:EnableMouseWheel(true)
     local buyScrollChild = CreateFrame("Frame", nil, buyScroll)
     self.buyScrollChild = buyScrollChild
-    buyScrollChild:SetSize(438, BUY_ROWS * 52)
+    buyScrollChild:SetSize(438, (BUY_ROWS - 1) * 52)
     buyScroll:SetScrollChild(buyScrollChild)
     buyScroll:SetScript("OnMouseWheel", function(scroll, delta)
-        local maximum = scroll.GetVerticalScrollRange and scroll:GetVerticalScrollRange() or math.max(0, (BUY_ROWS * 52) - 144)
+        local maximum = scroll.GetVerticalScrollRange and scroll:GetVerticalScrollRange() or math.max(0, ((BUY_ROWS - 1) * 52) - 92)
         local nextValue = math.max(0, math.min(maximum, (scroll:GetVerticalScroll() or 0) - (delta * 52)))
         scroll:SetVerticalScroll(nextValue)
         local scrollBar = scroll.ScrollBar or scroll.scrollBar
         if scrollBar and scrollBar.SetValue then scrollBar:SetValue(nextValue) end
     end)
-    for index = 1, BUY_ROWS do
-        local row = recommendationRow(buyScrollChild, 48, 432)
+    for index = 1, BUY_ROWS - 1 do
+        local row = recommendationRow(buyScrollChild, 48, 432, true)
         row.container:SetPoint("TOPLEFT", 0, -((index - 1) * 52))
         self.buyRows[index] = row
     end
@@ -186,7 +249,7 @@ function BOD.Sidecar:CreatePlanPanel(frame, anchor)
     local bagHeader = sectionLabel(panel, "SELL These Items From Your Bags")
     bagHeader:SetPoint("TOPLEFT", buyScroll, "BOTTOMLEFT", 0, -10)
     for index = 1, SELL_ROWS do
-        local row = recommendationRow(panel, 38)
+        local row = recommendationRow(panel, 38, nil, true)
         row.container:SetPoint("TOPLEFT", bagHeader, "BOTTOMLEFT", 0, -7 - ((index - 1) * 42))
         self.bagRows[index] = row
     end
@@ -195,6 +258,277 @@ function BOD.Sidecar:CreatePlanPanel(frame, anchor)
     self.planNote:SetPoint("TOPLEFT", self.bagRows[SELL_ROWS].container, "BOTTOMLEFT", 0, -7)
     self.planNote:SetSize(475, 24)
     self.planNote:SetText("Flip score estimates resale ease; demand is never guaranteed. Buy and post manually.")
+end
+
+local function tradeStateLabel(value)
+    return tostring(value or "WATCHING"):gsub("_", " "):lower():gsub("^%l", string.upper)
+end
+
+local function rateLabel(value)
+    return tostring(math.floor((tonumber(value) or 0) * 100 + 0.5)) .. "%"
+end
+
+local function signedMoney(value)
+    value = math.floor(tonumber(value) or 0)
+    return value < 0 and ("-" .. BOD:FormatMoney(-value)) or BOD:FormatMoney(value)
+end
+
+function BOD.Sidecar:CreateTradesPanel(frame, anchor)
+    local panel = CreateFrame("Frame", nil, frame)
+    panel:SetPoint("TOPLEFT", anchor, "BOTTOMLEFT", 0, -12)
+    panel:SetSize(488, 460)
+    self.panels.TRADES = panel
+
+    local heading = font(panel, "GameFontNormalLarge")
+    heading:SetPoint("TOPLEFT", 4, -4)
+    heading:SetText("Trades")
+    local rulesButton = button(panel, "Trade Rules", 100, 22)
+    rulesButton:SetPoint("TOPRIGHT", -8, -1)
+    rulesButton:SetScript("OnClick", function() self:SetTradeRulesOpen(true) end)
+
+    local scroll = CreateFrame("ScrollFrame", nil, panel, "UIPanelScrollFrameTemplate")
+    scroll:SetPoint("TOPLEFT", heading, "BOTTOMLEFT", 0, -8)
+    scroll:SetSize(462, 425)
+    scroll:EnableMouseWheel(true)
+    local child = CreateFrame("Frame", nil, scroll)
+    child:SetSize(438, 940)
+    scroll:SetScrollChild(child)
+    scroll:SetScript("OnMouseWheel", function(value, delta)
+        local maximum = value.GetVerticalScrollRange and value:GetVerticalScrollRange() or 365
+        value:SetVerticalScroll(math.max(0, math.min(maximum, (value:GetVerticalScroll() or 0) - delta * 52)))
+    end)
+    self.tradeScroll = scroll
+
+    local capitalHeader = sectionLabel(child, "TRADING CAPITAL")
+    capitalHeader:SetPoint("TOPLEFT", 0, 0)
+    self.tradeCapitalText = font(child, "GameFontHighlightSmall")
+    self.tradeCapitalText:SetPoint("TOPLEFT", capitalHeader, "BOTTOMLEFT", 0, -6)
+    self.tradeCapitalText:SetSize(430, 68)
+
+    local bestHeader = sectionLabel(child, "BEST TRADE")
+    bestHeader:SetPoint("TOPLEFT", self.tradeCapitalText, "BOTTOMLEFT", 0, -8)
+    self.bestTradeRow = recommendationRow(child, 158, 432, true)
+    self.bestTradeRow.container:SetPoint("TOPLEFT", bestHeader, "BOTTOMLEFT", 0, -6)
+    self.findTradeButton = button(child, "Find Auctions", 112, 24)
+    self.findTradeButton:SetPoint("TOPLEFT", self.bestTradeRow.container, "BOTTOMLEFT", 0, -6)
+    self.findTradeButton:SetScript("OnClick", function() self:FindSelectedTrade() end)
+    self.trackTradeButton = button(child, "Track Trade", 105, 24)
+    self.trackTradeButton:SetPoint("LEFT", self.findTradeButton, "RIGHT", 8, 0)
+    self.trackTradeButton:SetScript("OnClick", function() self:TrackSelectedTrade() end)
+    self.tradeStatusText = font(child, "GameFontDisableSmall")
+    self.tradeStatusText:SetPoint("LEFT", self.trackTradeButton, "RIGHT", 10, 0)
+    self.tradeStatusText:SetSize(190, 30)
+
+    local moreHeader = sectionLabel(child, "MORE TRADES · click one to select it")
+    moreHeader:SetPoint("TOPLEFT", self.findTradeButton, "BOTTOMLEFT", 0, -10)
+    self.additionalTradeRows = {}
+    for index = 1, 2 do
+        local rowIndex = index
+        local row = recommendationRow(child, 66, 432, true)
+        row.container:SetPoint("TOPLEFT", moreHeader, "BOTTOMLEFT", 0, -6 - ((index - 1) * 72))
+        row.container:SetScript("OnMouseUp", function() self:SelectTradeRecommendation(rowIndex + 1) end)
+        self.additionalTradeRows[index] = row
+    end
+
+    local openHeader = sectionLabel(child, "OPEN TRADES · click one to manage it")
+    openHeader:SetPoint("TOPLEFT", self.additionalTradeRows[2].container, "BOTTOMLEFT", 0, -10)
+    self.openTradeRows = {}
+    for index = 1, 5 do
+        local rowIndex = index
+        local row = recommendationRow(child, 48, 432, true)
+        row.container:SetPoint("TOPLEFT", openHeader, "BOTTOMLEFT", 0, -6 - ((index - 1) * 54))
+        row.container:SetScript("OnMouseUp", function() self:SelectOpenTrade(rowIndex) end)
+        self.openTradeRows[index] = row
+    end
+
+    local actionAnchor = self.openTradeRows[5].container
+    local buyQtyLabel = sectionLabel(child, "Purchased qty")
+    buyQtyLabel:SetPoint("TOPLEFT", actionAnchor, "BOTTOMLEFT", 0, -10)
+    self.tradeBuyQtyBox = CreateFrame("EditBox", nil, child, "InputBoxTemplate")
+    self.tradeBuyQtyBox:SetSize(44, 22); self.tradeBuyQtyBox:SetPoint("LEFT", buyQtyLabel, "RIGHT", 7, 0); self.tradeBuyQtyBox:SetNumeric(true); self.tradeBuyQtyBox:SetAutoFocus(false); self.tradeBuyQtyBox:SetText("1")
+    local buyPriceLabel = sectionLabel(child, "Unit silver")
+    buyPriceLabel:SetPoint("LEFT", self.tradeBuyQtyBox, "RIGHT", 10, 0)
+    self.tradeBuyPriceBox = CreateFrame("EditBox", nil, child, "InputBoxTemplate")
+    self.tradeBuyPriceBox:SetSize(56, 22); self.tradeBuyPriceBox:SetPoint("LEFT", buyPriceLabel, "RIGHT", 7, 0); self.tradeBuyPriceBox:SetNumeric(true); self.tradeBuyPriceBox:SetAutoFocus(false); self.tradeBuyPriceBox:SetText("0")
+    local addPurchase = button(child, "Mark Purchased", 112, 22)
+    addPurchase:SetPoint("LEFT", self.tradeBuyPriceBox, "RIGHT", 8, 0)
+    addPurchase:SetScript("OnClick", function() self:AddTradePurchase() end)
+
+    local saleQtyLabel = sectionLabel(child, "Sold qty")
+    saleQtyLabel:SetPoint("TOPLEFT", buyQtyLabel, "BOTTOMLEFT", 0, -12)
+    self.tradeSaleQtyBox = CreateFrame("EditBox", nil, child, "InputBoxTemplate")
+    self.tradeSaleQtyBox:SetSize(44, 22); self.tradeSaleQtyBox:SetPoint("LEFT", saleQtyLabel, "RIGHT", 7, 0); self.tradeSaleQtyBox:SetNumeric(true); self.tradeSaleQtyBox:SetAutoFocus(false); self.tradeSaleQtyBox:SetText("1")
+    local revenueLabel = sectionLabel(child, "Net silver")
+    revenueLabel:SetPoint("LEFT", self.tradeSaleQtyBox, "RIGHT", 10, 0)
+    self.tradeSaleRevenueBox = CreateFrame("EditBox", nil, child, "InputBoxTemplate")
+    self.tradeSaleRevenueBox:SetSize(56, 22); self.tradeSaleRevenueBox:SetPoint("LEFT", revenueLabel, "RIGHT", 7, 0); self.tradeSaleRevenueBox:SetNumeric(true); self.tradeSaleRevenueBox:SetAutoFocus(false); self.tradeSaleRevenueBox:SetText("0")
+    local recordSale = button(child, "Record Sale", 92, 22)
+    recordSale:SetPoint("LEFT", self.tradeSaleRevenueBox, "RIGHT", 8, 0)
+    recordSale:SetScript("OnClick", function() self:RecordTradeSale() end)
+
+    local listed = button(child, "Mark Listed", 92, 22)
+    listed:SetPoint("TOPLEFT", saleQtyLabel, "BOTTOMLEFT", 0, -12)
+    listed:SetScript("OnClick", function() self:MarkTradeListed() end)
+    local closeTrade = button(child, "Close", 72, 22)
+    closeTrade:SetPoint("LEFT", listed, "RIGHT", 8, 0)
+    closeTrade:SetScript("OnClick", function() self:CloseSelectedTrade(false) end)
+    local abandonTrade = button(child, "Abandon", 78, 22)
+    abandonTrade:SetPoint("LEFT", closeTrade, "RIGHT", 8, 0)
+    abandonTrade:SetScript("OnClick", function() self:CloseSelectedTrade(true) end)
+
+    local historyHeader = sectionLabel(child, "TRADE HISTORY")
+    historyHeader:SetPoint("TOPLEFT", listed, "BOTTOMLEFT", 0, -12)
+    self.tradeHistoryRows = {}
+    for index = 1, 2 do
+        local row = recommendationRow(child, 48, 432, true)
+        row.container:SetPoint("TOPLEFT", historyHeader, "BOTTOMLEFT", 0, -6 - ((index - 1) * 54))
+        self.tradeHistoryRows[index] = row
+    end
+
+    self:CreateTradeRulesPanel(panel)
+end
+
+function BOD.Sidecar:CreateTradeRulesPanel(parent)
+    local template = BackdropTemplateMixin and "BackdropTemplate" or nil
+    local panel = CreateFrame("Frame", nil, parent, template)
+    self.tradeRulesPanel = panel
+    panel:SetPoint("TOPLEFT", 0, -30)
+    panel:SetSize(480, 430)
+    if panel.SetBackdrop then
+        panel:SetBackdrop({ bgFile = "Interface\\Buttons\\WHITE8X8", edgeFile = "Interface\\Tooltips\\UI-Tooltip-Border", edgeSize = 12, insets = { left = 3, right = 3, top = 3, bottom = 3 } })
+        panel:SetBackdropColor(0.07, 0.05, 0.025, 0.98)
+    end
+    local title = sectionLabel(panel, "TRADE RULES")
+    title:SetPoint("TOPLEFT", 12, -12)
+    local help = font(panel, "GameFontDisableSmall")
+    help:SetPoint("TOPLEFT", title, "BOTTOMLEFT", 0, -5)
+    help:SetText("Balanced defaults are recommended. Zero capital caps use the selected risk mode.")
+
+    self.tradeEnabledButton = button(panel, "Enabled", 92, 22)
+    self.tradeEnabledButton:SetPoint("TOPLEFT", help, "BOTTOMLEFT", 0, -10)
+    self.tradeEnabledButton:SetScript("OnClick", function()
+        local value = BOD.TradeService:GetSettings(); value.enabled = value.enabled == false; self:RefreshTradeRules()
+    end)
+    self.tradeRiskButton = button(panel, "Balanced", 112, 22)
+    self.tradeRiskButton:SetPoint("LEFT", self.tradeEnabledButton, "RIGHT", 8, 0)
+    self.tradeRiskButton:SetScript("OnClick", function()
+        local value = BOD.TradeService:GetSettings()
+        value.riskMode = value.riskMode == "CONSERVATIVE" and "BALANCED" or (value.riskMode == "BALANCED" and "AGGRESSIVE" or "CONSERVATIVE")
+        self:RefreshTradeRules()
+    end)
+    self.tradeSpecButton = button(panel, "Speculative: OFF", 125, 22)
+    self.tradeSpecButton:SetPoint("LEFT", self.tradeRiskButton, "RIGHT", 8, 0)
+    self.tradeSpecButton:SetScript("OnClick", function()
+        local value = BOD.TradeService:GetSettings(); value.showSpeculativeTrades = value.showSpeculativeTrades ~= true; self:RefreshTradeRules()
+    end)
+
+    local function editRow(labelText, y, width)
+        local label = sectionLabel(panel, labelText)
+        label:SetPoint("TOPLEFT", 12, y)
+        local box = CreateFrame("EditBox", nil, panel, "InputBoxTemplate")
+        box:SetSize(width or 72, 22); box:SetPoint("LEFT", label, "LEFT", 205, 0); box:SetNumeric(true); box:SetAutoFocus(false)
+        return box
+    end
+    self.tradeReserveBox = editRow("Emergency reserve (gold)", -88)
+    self.tradePerCapBox = editRow("Maximum per trade (gold, 0 = mode)", -116)
+    self.tradeTotalCapBox = editRow("Maximum committed (gold, 0 = mode)", -144)
+    self.tradeMaxOpenBox = editRow("Maximum open trades", -172, 52)
+    self.tradeMinProfitBox = editRow("Minimum low-case profit (silver)", -200)
+    self.tradeMinDiscountBox = editRow("Minimum discount (%)", -228, 52)
+    self.tradeMinObservationsBox = editRow("Minimum observations", -256, 52)
+    self.tradeRetentionBox = editRow("History entries retained", -284, 52)
+
+    local demandLabel = sectionLabel(panel, "Minimum demand")
+    demandLabel:SetPoint("TOPLEFT", 300, -88)
+    self.tradeDemandButton = button(panel, "Active", 105, 22)
+    self.tradeDemandButton:SetPoint("TOPLEFT", demandLabel, "BOTTOMLEFT", 0, -5)
+    self.tradeDemandButton:SetScript("OnClick", function()
+        local value = BOD.TradeService:GetSettings()
+        value.minimumDemand = value.minimumDemand == "SLOW" and "ACTIVE" or (value.minimumDemand == "ACTIVE" and "HOT" or "SLOW")
+        self:RefreshTradeRules()
+    end)
+    local confidenceLabel = sectionLabel(panel, "Minimum confidence")
+    confidenceLabel:SetPoint("TOPLEFT", self.tradeDemandButton, "BOTTOMLEFT", 0, -12)
+    self.tradeConfidenceButton = button(panel, "Fair", 105, 22)
+    self.tradeConfidenceButton:SetPoint("TOPLEFT", confidenceLabel, "BOTTOMLEFT", 0, -5)
+    self.tradeConfidenceButton:SetScript("OnClick", function()
+        local value = BOD.TradeService:GetSettings()
+        value.minimumConfidence = value.minimumConfidence == "SPECULATIVE" and "FAIR" or (value.minimumConfidence == "FAIR" and "STRONG" or "SPECULATIVE")
+        self:RefreshTradeRules()
+    end)
+
+    self.tradeRulesStatus = font(panel, "GameFontHighlightSmall")
+    self.tradeRulesStatus:SetPoint("BOTTOMLEFT", 12, 47)
+    self.tradeRulesStatus:SetSize(250, 32)
+    local apply = button(panel, "Apply Rules", 100, 24)
+    apply:SetPoint("BOTTOMLEFT", 12, 14)
+    apply:SetScript("OnClick", function() self:SaveTradeRules() end)
+    self.tradeResetButton = button(panel, "Reset Trade Data", 125, 24)
+    self.tradeResetButton:SetPoint("LEFT", apply, "RIGHT", 8, 0)
+    self.tradeResetButton:SetScript("OnClick", function() self:ResetTradeData() end)
+    local back = button(panel, "Back", 78, 24)
+    back:SetPoint("BOTTOMRIGHT", -12, 14)
+    back:SetScript("OnClick", function() self:SetTradeRulesOpen(false) end)
+    panel:Hide()
+end
+
+function BOD.Sidecar:SetTradeRulesOpen(open)
+    if not self.tradeRulesPanel then return end
+    self.tradeRulesOpen = open == true
+    if self.tradeRulesOpen then
+        self.tradeScroll:Hide(); self.tradeRulesPanel:Show(); self:RefreshTradeRules()
+    else
+        self.tradeRulesPanel:Hide(); self.tradeScroll:Show(); self:RefreshTrades()
+    end
+end
+
+function BOD.Sidecar:RefreshTradeRules()
+    if not self.tradeRulesPanel then return end
+    local value = BOD.TradeService:GetSettings()
+    self.tradeEnabledButton:SetText(value.enabled == false and "Trades: OFF" or "Trades: ON")
+    self.tradeRiskButton:SetText("Risk: " .. tostring(value.riskMode):lower():gsub("^%l", string.upper))
+    self.tradeSpecButton:SetText(value.showSpeculativeTrades and "Speculative: ON" or "Speculative: OFF")
+    self.tradeDemandButton:SetText(tostring(value.minimumDemand):lower():gsub("^%l", string.upper))
+    self.tradeConfidenceButton:SetText(tostring(value.minimumConfidence):lower():gsub("^%l", string.upper))
+    self.tradeReserveBox:SetText(tostring(math.floor((value.emergencyReserveCopper or 0) / 10000)))
+    self.tradePerCapBox:SetText(tostring(math.floor((value.maximumCapitalPerTradeCopper or 0) / 10000)))
+    self.tradeTotalCapBox:SetText(tostring(math.floor((value.maximumTotalCapitalCommittedCopper or 0) / 10000)))
+    self.tradeMaxOpenBox:SetText(tostring(value.maxOpenTrades or 5))
+    self.tradeMinProfitBox:SetText(tostring(math.floor((value.minimumAbsoluteProfitCopper or 0) / 100)))
+    self.tradeMinDiscountBox:SetText(tostring(value.minimumDiscountPercent or 15))
+    self.tradeMinObservationsBox:SetText(tostring(value.minimumObservationCount or 5))
+    self.tradeRetentionBox:SetText(tostring(value.tradeHistoryRetention or 50))
+end
+
+function BOD.Sidecar:SaveTradeRules()
+    local value = BOD.TradeService:GetSettings()
+    local function numeric(box, fallback) return math.max(0, math.floor(tonumber(box:GetText()) or fallback or 0)) end
+    value.emergencyReserveCopper = math.min(MAX_SAFE_INTEGER, numeric(self.tradeReserveBox) * 10000)
+    value.maximumCapitalPerTradeCopper = math.min(MAX_SAFE_INTEGER, numeric(self.tradePerCapBox) * 10000)
+    value.maximumTotalCapitalCommittedCopper = math.min(MAX_SAFE_INTEGER, numeric(self.tradeTotalCapBox) * 10000)
+    value.maxOpenTrades = math.max(1, math.min(5, numeric(self.tradeMaxOpenBox, 5)))
+    value.minimumAbsoluteProfitCopper = math.min(MAX_SAFE_INTEGER, numeric(self.tradeMinProfitBox) * 100)
+    value.minimumDiscountPercent = math.min(90, numeric(self.tradeMinDiscountBox, 15))
+    value.minimumObservationCount = math.max(1, math.min(30, numeric(self.tradeMinObservationsBox, 5)))
+    value.tradeHistoryRetention = math.max(1, math.min(500, numeric(self.tradeRetentionBox, 50)))
+    BOD.TradeService:Invalidate()
+    self.tradeRulesStatus:SetText("Rules saved. Recommendations will be recalculated.")
+    self:RefreshTradeRules()
+end
+
+function BOD.Sidecar:ResetTradeData()
+    if not self.tradeResetArmed then
+        self.tradeResetArmed = true
+        self.tradeResetButton:SetText("Confirm Reset")
+        self.tradeRulesStatus:SetText("Click Confirm Reset to erase open trades and trade history.")
+        return
+    end
+    BOD.TradeTracker:Reset()
+    BOD.TradeService:Invalidate()
+    self.selectedTradeId = nil
+    self.tradeResetArmed = false
+    self.tradeResetButton:SetText("Reset Trade Data")
+    self.tradeRulesStatus:SetText("Trade tracking data was reset. Market history was preserved.")
 end
 
 function BOD.Sidecar:CreateCraftPanel(frame, anchor)
@@ -219,7 +553,7 @@ function BOD.Sidecar:CreateCraftPanel(frame, anchor)
     local header = sectionLabel(panel, "CRAFT These Items")
     header:SetPoint("TOPLEFT", self.craftSummary, "BOTTOMLEFT", 0, -8)
     for index = 1, CRAFT_ROWS do
-        local row = recommendationRow(panel, 70)
+        local row = recommendationRow(panel, 70, nil, true)
         row.container:SetPoint("TOPLEFT", header, "BOTTOMLEFT", 0, -9 - ((index - 1) * 76))
         self.craftRows[index] = row
     end
@@ -227,7 +561,7 @@ function BOD.Sidecar:CreateCraftPanel(frame, anchor)
     local note = font(panel, "GameFontDisableSmall")
     note:SetPoint("TOPLEFT", self.craftRows[CRAFT_ROWS].container, "BOTTOMLEFT", 0, -8)
     note:SetSize(475, 32)
-    note:SetText("Profit includes the 5% Auction House cut, but not deposits, cooldowns, or unsold items.")
+    note:SetText("Profit includes the 5% Auction House cut and modeled deposit loss. Unsold items are still a risk.")
 end
 
 function BOD.Sidecar:CreateSellPanel(frame, anchor)
@@ -351,14 +685,13 @@ function BOD.Sidecar:CreateGuidePanel(frame, anchor)
     self.guideText:SetPoint("TOPLEFT", self.guideTitle, "BOTTOMLEFT", 0, -4)
     self.guideText:SetSize(326, 36)
 
-    self.guideBack = button(panel, "Back", 62, 24)
+    self.guideBack = button(panel, "Exit", 62, 24)
     self.guideBack:SetPoint("BOTTOMRIGHT", -76, 8)
-    self.guideBack:SetScript("OnClick", function() self:SetGuideStep((settings().guidedStep or 1) - 1) end)
-    self.guideNext = button(panel, "Next", 62, 24)
+    self.guideBack:SetScript("OnClick", function() self:SetGuided(false) end)
+    self.guideNext = button(panel, "Show me", 62, 24)
     self.guideNext:SetPoint("LEFT", self.guideBack, "RIGHT", 6, 0)
     self.guideNext:SetScript("OnClick", function()
-        local step = tonumber(settings().guidedStep) or 1
-        if step >= #GUIDE_STEPS then self:SetGuided(false) else self:SetGuideStep(step + 1) end
+        if self.guidedTargetView then self:SetView(self.guidedTargetView) end
     end)
 end
 
@@ -380,31 +713,54 @@ end
 
 function BOD.Sidecar:RefreshGuide()
     if not self.guidePanel or settings().guidedMode ~= true then return end
-    local stepNumber = math.max(1, math.min(#GUIDE_STEPS, math.floor(tonumber(settings().guidedStep) or 1)))
-    local step = GUIDE_STEPS[stepNumber]
-    self.guideTitle:SetText(string.format("GUIDED · STEP %d OF %d · %s", stepNumber, #GUIDE_STEPS, step.title))
-    self.guideText:SetText(step.text)
-    self.guideBack:SetEnabled(stepNumber > 1)
-    self.guideNext:SetText(stepNumber == #GUIDE_STEPS and "Finish" or "Next")
-end
-
-function BOD.Sidecar:SetGuideStep(stepNumber)
-    stepNumber = math.max(1, math.min(#GUIDE_STEPS, math.floor(tonumber(stepNumber) or 1)))
-    settings().guidedStep = stepNumber
-    local view = GUIDE_STEPS[stepNumber].view
-    if view and self.panels[view] then
-        self.activeView = view
-        settings().sidecarView = view
+    local title, message, targetView = "REVIEW THE PLAN", "Review the strongest safe opportunity. Always check the shown maximum price before buying.", "PLAN"
+    local snapshot = BOD.MarketData and BOD.MarketData:GetLatestSnapshot() or nil
+    local nowValue = type(time) == "function" and time() or os.time()
+    local observedAt = snapshot and tonumber(snapshot.observationTimestamp or snapshot.completedAt) or nil
+    if not BOD.AuctionAPI:IsAuctionHouseOpen() then
+        title, message, targetView = "OPEN THE AUCTION HOUSE", "Open the Auction House to begin. Bank of Durotar never scans or buys by itself.", nil
+    elseif BOD.FullScanProbe.active then
+        title, message, targetView = "WAIT FOR THE SCAN", "The market scan is running. Wait for processing to finish before using a recommendation.", nil
+    elseif not snapshot then
+        title, message, targetView = "SCAN REQUIRED", "Click Scan Market above to collect prices. One deliberate click starts one scan.", nil
+    elseif not observedAt or math.max(0, nowValue - observedAt) > 86400 then
+        title, message, targetView = "PRICES ARE OLD", "Run a new market scan before buying. Old recommendations are not shown as safe.", nil
+    elseif self.activeView == "SELL" and not self.selectedItemKey then
+        title, message, targetView = "CHOOSE AN ITEM", "Drag one item from your bags into the large box, then enter the stack quantity.", "SELL"
+    elseif self.activeView == "SELL" then
+        title, message, targetView = "USE THE SELLING PRICE", "Copy the recommended Bid and Buyout into Blizzard's sell window, then post manually.", "SELL"
+    elseif self.activeView == "CRAFT" then
+        title, message, targetView = "REVIEW CRAFTS", "Open each profession once. Craft only when the shown material cost, profit, and confidence are supported.", "CRAFT"
+    elseif self.currentPlan and self.currentPlan.bestMove and self.bestMoveFreshness and not self.bestMoveFreshness.safe then
+        title, message, targetView = "PRICE NEEDS A RECHECK", tostring(self.bestMoveFreshness.message or "Run a new market scan before buying."), "PLAN"
+    elseif self.currentPlan and self.currentPlan.bestMove then
+        local best = self.currentPlan.bestMove
+        if (tonumber(best.ownedQuantity) or 0) > 0 then
+            title = "CHECK WHAT YOU OWN"
+            message = string.format("You already own %d %s in your bags. Consider selling those before buying more.", tonumber(best.ownedQuantity) or 0, tostring(best.itemName or "of this item"))
+        else
+            title = "REVIEW THE BEST MOVE"
+            message = "Review the featured item. Buy only the shown quantity and never pay above its maximum price."
+        end
+    elseif self.currentPlan and not self.currentPlan.bestMove and self.currentPlan.largerTradeAvailable then
+        title, message, targetView = "LARGER OPPORTUNITY", "No simple quick move is safe, but a larger tracked opportunity is available under Trades.", "TRADES"
+    elseif self.currentPlan and #(self.currentPlan.sells or {}) > 0 then
+        title, message, targetView = "SELL INSTEAD", "No safe purchase is available. Review the bag-sale suggestions instead of forcing a buy.", "PLAN"
+    else
+        title, message, targetView = "WAIT", "No safe opportunity was found right now. Keep your gold and scan again later.", "PLAN"
     end
-    self:Refresh()
+    self.guidedTargetView = targetView
+    self.guideTitle:SetText("GUIDED · NEXT ACTION · " .. title)
+    self.guideText:SetText(message)
+    self.guideBack:SetEnabled(true)
+    if targetView and targetView ~= self.activeView then self.guideNext:Show() else self.guideNext:Hide() end
 end
 
 function BOD.Sidecar:SetGuided(enabled)
     settings().guidedMode = enabled and true or false
-    if enabled then settings().guidedStep = 1 end
     self:ApplyGuidedLayout()
     self:ApplyLayout()
-    if enabled then self:SetGuideStep(settings().guidedStep) else self:Refresh() end
+    self:Refresh()
 end
 
 function BOD.Sidecar:EnsureCreated()
@@ -441,10 +797,10 @@ function BOD.Sidecar:EnsureCreated()
     self.status:SetPoint("TOPLEFT", self.scanButton, "TOPRIGHT", 14, -2)
     self.status:SetSize(290, 48)
 
-    local tabs = { { "PLAN", "Plan" }, { "CRAFT", "Craft" }, { "SELL", "Sell Price" } }
+    local tabs = { { "PLAN", "Plan" }, { "TRADES", "Trades" }, { "CRAFT", "Craft" }, { "SELL", "Sell Price" } }
     local previous
     for index, tab in ipairs(tabs) do
-        local tabButton = button(frame, tab[2], 152, 28)
+        local tabButton = button(frame, tab[2], 112, 28)
         self.viewButtons[tab[1]] = tabButton
         if index == 1 then tabButton:SetPoint("TOPLEFT", self.scanButton, "BOTTOMLEFT", 0, -12)
         else tabButton:SetPoint("LEFT", previous, "RIGHT", 8, 0) end
@@ -453,6 +809,7 @@ function BOD.Sidecar:EnsureCreated()
     end
 
     self:CreatePlanPanel(frame, self.viewButtons.PLAN)
+    self:CreateTradesPanel(frame, self.viewButtons.PLAN)
     self:CreateCraftPanel(frame, self.viewButtons.PLAN)
     self:CreateSellPanel(frame, self.viewButtons.PLAN)
     self:CreateGuidePanel(frame, self.viewButtons.PLAN)
@@ -515,47 +872,276 @@ function BOD.Sidecar:SaveBudget(refresh)
     local copper = math.min(MAX_SAFE_INTEGER, gold * COPPER_PER_GOLD)
     settings().goldBudgetCopper = copper
     self.budgetBox:SetText(tostring(math.floor(copper / COPPER_PER_GOLD)))
+    if self.minimumProfitBox then
+        local silver = math.max(0, math.floor(tonumber(self.minimumProfitBox:GetText()) or 0))
+        settings().minimumExpectedProfitCopper = math.min(MAX_SAFE_INTEGER, silver * 100)
+        self.minimumProfitBox:SetText(tostring(math.floor(settings().minimumExpectedProfitCopper / 100)))
+    end
     if refresh ~= false then self:RefreshPlan() end
 end
 
 function BOD.Sidecar:RefreshPlan()
     if self.activeView ~= "PLAN" then return end
-    local plan = BOD.GoldPlan:Build(settings().goldBudgetCopper)
+    local plan = BOD.GoldPlan:Build(settings().goldBudgetCopper, { minimumExpectedProfitCopper = settings().minimumExpectedProfitCopper })
+    self.currentPlan = plan
     if plan.status == "INVALID_BUDGET" then
         self.planSummary:SetText("Enter a gold budget of 1 or more.")
     elseif plan.status == "NO_DATA" then
-        self.planSummary:SetText("Budget: " .. BOD:FormatMoney(plan.budgetCopper) .. "  |  Scan the market first.\n" .. marketMemoryLabel())
+        self.planSummary:SetText("Budget: " .. BOD:FormatMoney(plan.budgetCopper) .. "  ·  Scan the market first.\nMinimum profit: " .. BOD:FormatMoney(settings().minimumExpectedProfitCopper) .. "  ·  " .. marketMemoryLabel())
+    elseif plan.status == "EMPTY" then
+        self.planSummary:SetText("No safe buy right now. " .. tostring(plan.primaryRejectionReason or "Keep your gold and try again later.") .. "\nMinimum profit: " .. BOD:FormatMoney(plan.minimumExpectedProfitCopper) .. "  ·  " .. marketMemoryLabel())
     else
-        self.planSummary:SetText("Budget: " .. BOD:FormatMoney(plan.budgetCopper) .. "  |  Planned: " .. BOD:FormatMoney(plan.investedCopper) .. "  |  Left: " .. BOD:FormatMoney(plan.remainingCopper) .. "\n" .. marketMemoryLabel())
+        self.planSummary:SetText("Budget: " .. BOD:FormatMoney(plan.budgetCopper) .. "  ·  Planned: " .. BOD:FormatMoney(plan.investedCopper) .. "  ·  Left: " .. BOD:FormatMoney(plan.remainingCopper) .. "\nMinimum profit: " .. BOD:FormatMoney(plan.minimumExpectedProfitCopper) .. "  ·  " .. marketMemoryLabel())
+    end
+
+    local best = plan.bestMove
+    if self.viewTradeButton then
+        if plan.largerTradeAvailable then self.viewTradeButton:Show() else self.viewTradeButton:Hide() end
+    end
+    if best then
+        setRowIcon(self.bestMoveRow, best.itemID)
+        setRowHelp(self.bestMoveRow, "How to read this", {
+            "Trust describes the available evidence, not a guaranteed sale.",
+            "Maximum buy price is for each item. Never pay more than that amount.",
+            "Expected net profit subtracts the Auction House cut and modeled relisting deposits.",
+        })
+        local ownedText = (tonumber(best.ownedQuantity) or 0) > 0 and ("  ·  You own " .. tostring(best.ownedQuantity) .. " in your bags") or ""
+        local freshness = BOD.OpportunityService:CheckRecommendationFreshness(best)
+        self.bestMoveFreshness = freshness
+        setRow(self.bestMoveRow, table.concat({
+            "|cffffd100" .. tostring(best.itemName or best.itemKey) .. "|r",
+            "Buy up to: " .. tostring(best.recommendedPurchaseQuantity or best.currentQuantity or 0) .. ownedText,
+            "Maximum buy price: " .. BOD:FormatMoney(best.maximumSafeUnitPrice) .. " each",
+            "Expected net profit: about " .. BOD:FormatMoney(best.conservativeNetProfit),
+            "Trust: " .. trustLabel(best.trustLabel) .. "  ·  Main risk: " .. tostring(best.mainRisk or "Market conditions can change"),
+            "Price check: " .. tostring(freshness.message),
+        }, "\n"))
+        self.planNote:SetText("Recommendation uses the latest completed scan, not a live purchase check. Buy and post manually.")
+    else
+        setRowIcon(self.bestMoveRow, nil)
+        setRowHelp(self.bestMoveRow, "No safe opportunity", { "Waiting protects your gold when no item passes every safety rule." })
+        setRow(self.bestMoveRow, "|cffffd100No safe opportunity found right now.|r\n" .. tostring(plan.primaryRejectionReason or "Keep your gold and scan again later."))
+        self.bestMoveFreshness = nil
+        self.planNote:SetText("Waiting is a valid gold-making decision. Never force a purchase.")
     end
 
     for index, row in ipairs(self.buyRows) do
-        local buy = plan.buys[index]
+        local rank = index + 1
+        local buy = plan.buys[rank]
         if buy then
-            local outcomes = tonumber(buy.personalOutcomeCount) or 0
-            local historyText = outcomes >= 3 and string.format("sold %d/%d for you", tonumber(buy.personalSoldCount) or 0, outcomes) or (tostring(buy.confidence):lower() .. " confidence")
-            setRow(row, string.format("|cffffd100%d  %s × %d|r  ·  Flip score %d/100\nBuy stack for %s or less  ·  Sell near %s each  ·  Profit ~%s\n%d%% return  ·  %d listings now  ·  %d scans  ·  %s", index, tostring(buy.itemName or buy.itemKey), tonumber(buy.currentQuantity) or 0, tonumber(buy.flipScore) or 0, BOD:FormatMoney(buy.capitalRequired), BOD:FormatMoney(buy.resaleTargetUnitPrice), BOD:FormatMoney(buy.estimatedTotalUpside), math.floor((tonumber(buy.profitRate) or 0) * 100), tonumber(buy.listingCount) or 0, tonumber(buy.historyObservationCount) or 0, historyText))
+            setRowIcon(row, buy.itemID)
+            setRowHelp(row, "How to read this", {
+                "Trust describes price evidence, not sale speed.",
+                "Max is the most you should pay for each item.",
+                "Net profit includes the Auction House cut and modeled relisting deposits.",
+            })
+            local ownedText = (tonumber(buy.ownedQuantity) or 0) > 0 and (" · Own " .. tostring(buy.ownedQuantity)) or ""
+            setRow(row, string.format("|cffffd100%d  %s × %d|r  ·  Trust: %s%s\nMax %s each  ·  Net profit ~%s\nRisk: %s", rank, tostring(buy.itemName or buy.itemKey), tonumber(buy.recommendedPurchaseQuantity) or 0, trustLabel(buy.trustLabel), ownedText, BOD:FormatMoney(buy.maximumSafeUnitPrice), BOD:FormatMoney(buy.conservativeNetProfit), tostring(buy.mainRisk or "Market conditions can change")))
         else
-            setRow(row, index == 1 and "No safe buys found. It is better to wait than force a purchase." or "")
+            setRowIcon(row, nil)
+            setRowHelp(row, nil, nil)
+            setRow(row, "")
         end
     end
     if self.buyScrollChild then
-        self.buyScrollChild:SetHeight(math.max(144, math.max(1, #plan.buys) * 52))
-        local maximum = math.max(0, (math.max(1, #plan.buys) * 52) - 144)
+        local moreCount = math.max(0, #plan.buys - 1)
+        self.buyScrollChild:SetHeight(math.max(92, math.max(1, moreCount) * 52))
+        local maximum = math.max(0, (math.max(1, moreCount) * 52) - 92)
         if (self.buyScroll:GetVerticalScroll() or 0) > maximum then self.buyScroll:SetVerticalScroll(maximum) end
     end
 
     for index, row in ipairs(self.bagRows) do
         local sell = plan.sells[index]
         if sell then
+            setRowIcon(row, sell.itemID, sell.itemLink)
+            setRowHelp(row, "Bag sale suggestion", {
+                "Confidence describes the price evidence; it does not guarantee a buyer.",
+                "You must vendor or post the item manually.",
+            })
             if sell.saleMethod == "VENDOR" then
                 setRow(row, string.format("|cffffd100%d  Vendor %s × %d|r\nReceive %s  ·  Better than the expected Auction House return", index, tostring(sell.itemName), tonumber(sell.stackCount) or 0, BOD:FormatMoney(sell.stackPrice)))
             else
                 setRow(row, string.format("|cffffd100%d  Sell %s × %d|r\nList at %s  ·  %s each  ·  %s confidence", index, tostring(sell.itemName), tonumber(sell.stackCount) or 0, BOD:FormatMoney(sell.stackPrice), BOD:FormatMoney(sell.unitPrice), tostring(sell.confidence):lower()))
             end
         else
+            setRowIcon(row, nil)
+            setRowHelp(row, nil, nil)
             setRow(row, index == 1 and "No bag items have enough reliable market data yet." or "")
         end
+    end
+end
+
+function BOD.Sidecar:SelectTradeRecommendation(index)
+    local trade = self.currentTrades and self.currentTrades.opportunities and self.currentTrades.opportunities[index]
+    if not trade then return end
+    self.selectedTradeRecommendation = trade
+    self.tradeActionStatus = "Selected " .. tostring(trade.itemName) .. ". Use Find Auctions or Track Trade."
+    self:RefreshTrades(true)
+end
+
+function BOD.Sidecar:FindSelectedTrade()
+    local trade = self.selectedTradeRecommendation or (self.currentTrades and self.currentTrades.bestTrade)
+    if not trade then return end
+    local freshness = BOD.TradeService:CheckFreshness(trade)
+    if not freshness.safe then
+        self.tradeActionStatus = freshness.message
+    else
+        self.tradeActionStatus = "In Blizzard's Auction House, search for " .. tostring(trade.itemName) .. ". Do not pay more than " .. BOD:FormatMoney(trade.maximumBuyUnitPrice) .. " each."
+    end
+    self:RefreshTrades(true)
+end
+
+function BOD.Sidecar:TrackSelectedTrade()
+    local trade = self.selectedTradeRecommendation or (self.currentTrades and self.currentTrades.bestTrade)
+    if not trade then return end
+    local tracked, reason = BOD.TradeService:Track(trade)
+    if tracked then
+        self.selectedTradeId = tracked.id
+        self.tradeActionStatus = reason == "ALREADY_TRACKED" and "That item is already an open trade." or "Trade tracked. No purchase was made."
+    else
+        self.tradeActionStatus = reason == "MAX_OPEN_TRADES" and "Close an open trade before tracking another." or "Refresh the market before tracking this trade."
+    end
+    BOD.TradeService:Invalidate()
+    self:RefreshTrades()
+end
+
+function BOD.Sidecar:SelectOpenTrade(index)
+    local values = self.currentTrades and self.currentTrades.openTrades or {}
+    if not values[index] then return end
+    self.selectedTradeId = values[index].id
+    self.tradeActionStatus = "Managing " .. tostring(values[index].itemName) .. ". All lifecycle updates are manual."
+    self:RefreshTrades(true)
+end
+
+function BOD.Sidecar:AddTradePurchase()
+    if not self.selectedTradeId then self.tradeActionStatus = "Select an open trade first."; self:RefreshTrades(true); return end
+    local quantity = math.floor(tonumber(self.tradeBuyQtyBox:GetText()) or 0)
+    local unitCost = math.floor(tonumber(self.tradeBuyPriceBox:GetText()) or 0) * 100
+    local trade, reason = BOD.TradeTracker:AddPurchase(self.selectedTradeId, quantity, unitCost)
+    if trade and reason == "PRICE_ABOVE_RECOMMENDATION" then
+        self.tradeActionStatus = "Purchase recorded for accurate cost basis, but its price was above the tracked maximum."
+    elseif trade and reason == "PURCHASE_QUANTITY_EXCEEDS_POSITION" then
+        self.tradeActionStatus = "Purchase recorded, but its quantity exceeded the tracked safe position."
+    else
+        self.tradeActionStatus = trade and "Purchase batch recorded. The addon did not buy anything." or "Enter a valid quantity and unit price in silver."
+    end
+    BOD.TradeService:Invalidate(); self:RefreshTrades()
+end
+
+function BOD.Sidecar:MarkTradeListed()
+    if not self.selectedTradeId then self.tradeActionStatus = "Select an open trade first."; self:RefreshTrades(true); return end
+    local trade = BOD.TradeTracker:MarkListed(self.selectedTradeId)
+    self.tradeActionStatus = trade and "Marked listed. Posting still happens manually in Blizzard's Auction House." or "Record a purchase before marking the trade listed."
+    self:RefreshTrades()
+end
+
+function BOD.Sidecar:RecordTradeSale()
+    if not self.selectedTradeId then self.tradeActionStatus = "Select an open trade first."; self:RefreshTrades(true); return end
+    local quantity = math.floor(tonumber(self.tradeSaleQtyBox:GetText()) or 0)
+    local revenue = math.floor(tonumber(self.tradeSaleRevenueBox:GetText()) or 0) * 100
+    local trade = BOD.TradeTracker:RecordSale(self.selectedTradeId, quantity, revenue)
+    self.tradeActionStatus = trade and "Sale recorded from the net revenue you entered." or "Enter a valid sold quantity and net revenue in silver."
+    BOD.TradeService:Invalidate(); self:RefreshTrades()
+end
+
+function BOD.Sidecar:CloseSelectedTrade(abandon)
+    if not self.selectedTradeId then self.tradeActionStatus = "Select an open trade first."; self:RefreshTrades(true); return end
+    local trade = abandon and BOD.TradeTracker:Abandon(self.selectedTradeId) or BOD.TradeTracker:Close(self.selectedTradeId)
+    self.tradeActionStatus = trade and (abandon and "Trade abandoned and moved to history." or "Trade closed and moved to history.") or "The selected trade no longer exists."
+    self.selectedTradeId = nil
+    BOD.TradeService:Invalidate(); self:RefreshTrades()
+end
+
+function BOD.Sidecar:RefreshTrades(keepResult)
+    if self.activeView ~= "TRADES" or self.tradeRulesOpen then return end
+    local result = keepResult and self.currentTrades or BOD.TradeService:Build()
+    if not result then result = BOD.TradeService:Build() end
+    self.currentTrades = result
+    if not keepResult and self.selectedTradeRecommendation then
+        local selectedKey = self.selectedTradeRecommendation.itemKey
+        self.selectedTradeRecommendation = nil
+        for _, trade in ipairs(result.opportunities or {}) do
+            if trade.itemKey == selectedKey then self.selectedTradeRecommendation = trade; break end
+        end
+    end
+    local limits = result.capitalLimits
+    self.tradeCapitalText:SetText(table.concat({
+        "Liquid gold: " .. BOD:FormatMoney(result.liquidGold),
+        "Emergency reserve: " .. BOD:FormatMoney(limits.emergencyReserve) .. "  ·  Available to trade: " .. BOD:FormatMoney(limits.availableCapital),
+        "Currently committed: " .. BOD:FormatMoney(result.committedCapital) .. "  ·  Open trades: " .. tostring(#result.openTrades),
+        "Risk mode: " .. tostring(result.settings.riskMode):lower():gsub("^%l", string.upper),
+    }, "\n"))
+
+    local best = result.bestTrade
+    if best then
+        setRowIcon(self.bestTradeRow, best.itemID)
+        setRowHelp(self.bestTradeRow, "Trade estimate", {
+            "The exit range is clamped to recent local medians; it is not a guaranteed sale.",
+            "Profit subtracts the 5% Auction House cut and modeled relisting deposits.",
+            "The current snapshot stores the cheapest exact listing, not a complete price ladder.",
+        })
+        local freshness = BOD.TradeService:CheckFreshness(best)
+        setRow(self.bestTradeRow, table.concat({
+            "|cffffd100" .. tostring(best.itemName) .. "|r",
+            "Recommended purchase: " .. tostring(best.recommendedPurchaseQuantity) .. "  ·  Maximum safe purchase: " .. tostring(best.maximumSafePurchaseQuantity),
+            "Maximum buy price: " .. BOD:FormatMoney(best.maximumBuyUnitPrice) .. " each  ·  Required capital: " .. BOD:FormatMoney(best.requiredCapital),
+            "Expected sale range: " .. BOD:FormatMoney(best.fastExitUnitPrice) .. "–" .. BOD:FormatMoney(best.normalExitUnitPrice) .. " each",
+            "Estimated net profit: " .. BOD:FormatMoney(best.lowProfit) .. "–" .. BOD:FormatMoney(best.normalProfit),
+            "Expected return: " .. rateLabel(best.lowReturnRate) .. "–" .. rateLabel(best.normalReturnRate),
+            "Demand: " .. tostring(best.demand):lower():gsub("^%l", string.upper) .. "  ·  Confidence: " .. trustLabel(best.confidence),
+            "Main risk: " .. tostring(best.mainRisk) .. "  ·  " .. tostring(freshness.message),
+            "Why: " .. tostring(best.why),
+        }, "\n"))
+        self.findTradeButton:SetEnabled(true); self.trackTradeButton:SetEnabled(true)
+    else
+        setRowIcon(self.bestTradeRow, nil)
+        setRowHelp(self.bestTradeRow, "No qualified trade", { tostring(result.primaryRejectionReason or "Waiting protects your capital.") })
+        local message = result.status == "SCANNING" and "Trade opportunities will be evaluated after the market scan finishes."
+            or (result.status == "NO_DATA" and "Run a market scan before evaluating trades.")
+            or (result.status == "INSUFFICIENT_HISTORY" and "More market observations are needed before larger trades can be recommended.")
+            or (result.status == "CAPITAL_TOO_LOW" and "Current opportunities require more trading capital than is safely available.")
+            or (result.status == "CAPITAL_COMMITTED" and "Available trading capital is already committed to open trades.")
+            or (result.status == "DISABLED" and "Trades is disabled. Open Trade Rules to enable it.")
+            or "No sensible trade meets your profit, demand, and capital rules right now."
+        setRow(self.bestTradeRow, "|cffffd100" .. message .. "|r\n" .. tostring(result.primaryRejectionReason or "No recommendation is forced."))
+        self.findTradeButton:SetEnabled(false); self.trackTradeButton:SetEnabled(false)
+    end
+    self.tradeStatusText:SetText(self.tradeActionStatus or "Buying and tracking require your click.")
+
+    for index, row in ipairs(self.additionalTradeRows) do
+        local trade = result.opportunities[index + 1]
+        if trade then
+            setRowIcon(row, trade.itemID)
+            setRowHelp(row, "Additional trade", { "Click to select this trade for Find Auctions or Track Trade." })
+            setRow(row, string.format("|cffffd100%s|r  ·  %s\nCapital: %s  ·  Profit: %s–%s\nDemand: %s  ·  Confidence: %s", tostring(trade.itemName), tostring(trade.tag or "Qualified"), BOD:FormatMoney(trade.requiredCapital), BOD:FormatMoney(trade.lowProfit), BOD:FormatMoney(trade.normalProfit), tostring(trade.demand):lower(), trustLabel(trade.confidence)))
+        else setRowIcon(row, nil); setRowHelp(row, nil, nil); setRow(row, "") end
+    end
+
+    local selectedFound
+    for index, row in ipairs(self.openTradeRows) do
+        local trade = result.openTrades[index]
+        if trade then
+            if trade.id == self.selectedTradeId then selectedFound = true end
+            setRowIcon(row, trade.itemID)
+            setRowHelp(row, "Tracked trade", { "This record changes only when you use the manual lifecycle buttons." })
+            local prefix = trade.id == self.selectedTradeId and "|cff80ff80SELECTED|r · " or ""
+            setRow(row, prefix .. string.format("|cffffd100%s|r  ·  %s\nBought %d  ·  Remaining %d  ·  Cost basis %s  ·  Realized %s", tostring(trade.itemName), tradeStateLabel(trade.state), tonumber(trade.quantityPurchased) or 0, tonumber(trade.quantityRemaining) or 0, BOD:FormatMoney(trade.remainingCostBasis), signedMoney(trade.realizedProfit)))
+        else setRowIcon(row, nil); setRowHelp(row, nil, nil); setRow(row, index == 1 and "No open trades. Recommendations are never tracked automatically." or "") end
+    end
+    if self.selectedTradeId and not selectedFound then self.selectedTradeId = nil end
+
+    for index, row in ipairs(self.tradeHistoryRows) do
+        local trade = result.history[index]
+        if trade then
+            setRowIcon(row, trade.itemID)
+            setRowHelp(row, "Trade outcome", {
+                "Realized profit uses only the purchase cost and net sale revenue you recorded.",
+                "Gross revenue, Auction House cut, and deposits remain unknown when only net revenue was entered.",
+            })
+            local returnText = trade.returnOnCapital and rateLabel(trade.returnOnCapital) or "unknown"
+            local heldText = trade.timeHeldSeconds and ageLabel(trade.timeHeldSeconds) or "unknown"
+            setRow(row, string.format("|cffffd100%s|r  ·  %s\nCost %s  ·  Net %s  ·  Profit %s  ·  Return %s  ·  Held %s", tostring(trade.itemName), tradeStateLabel(trade.state), BOD:FormatMoney(trade.totalPurchaseCost), BOD:FormatMoney(trade.netRevenue), signedMoney(trade.realizedProfit), returnText, heldText))
+        else setRowIcon(row, nil); setRowHelp(row, nil, nil); setRow(row, index == 1 and "No completed or abandoned trades yet." or "") end
     end
 end
 
@@ -575,8 +1161,16 @@ function BOD.Sidecar:RefreshCraft()
     for index, row in ipairs(self.craftRows) do
         local craft = result.recommendations[index]
         if craft then
+            setRowIcon(row, craft.outputItemID)
+            setRowHelp(row, "Craft suggestion", {
+                "Materials are valued at conservative market prices, even when you already own them.",
+                "Profit subtracts the Auction House cut and modeled deposit loss.",
+                "Crafting and posting remain manual; a sale is never guaranteed.",
+            })
             setRow(row, string.format("|cffffd100%d  %s × %d|r  ·  %s\nMaterials: %s  ·  Sell: %s\nProfit ~%s  ·  %d%% margin  ·  %s confidence", index, tostring(craft.outputName), tonumber(craft.outputCount) or 1, tostring(craft.profession), BOD:FormatMoney(craft.reagentCost), BOD:FormatMoney(craft.sellPrice), BOD:FormatMoney(craft.estimatedProfit), math.floor((tonumber(craft.marginRate) or 0) * 100), tostring(craft.confidence):lower()))
         else
+            setRowIcon(row, nil)
+            setRowHelp(row, nil, nil)
             setRow(row, "")
         end
     end
@@ -634,12 +1228,12 @@ end
 function BOD.Sidecar:Refresh()
     if not self.frame or not self.frame:IsShown() then return end
     self:ShowView()
-    self:RefreshGuide()
     local lines, cooldown = BOD.FullScanProbe:GetCooldownStatusLines()
     self.status:SetText(table.concat(lines, "\n"))
     self.scanButton:SetText(BOD.FullScanProbe:GetPrimaryButtonText())
     self.scanButton:SetEnabled(BOD.FullScanProbe.active or (cooldown.state == "READY" and cooldown.canQueryAll == true))
-    self:RefreshPlan(); self:RefreshCraft(); self:RefreshSell()
+    self:RefreshPlan(); self:RefreshTrades(); self:RefreshCraft(); self:RefreshSell()
+    self:RefreshGuide()
 end
 
 function BOD.Sidecar:OnEvent(event)
@@ -647,5 +1241,8 @@ function BOD.Sidecar:OnEvent(event)
     elseif event == "PLAYER_LOGIN" then self:InstallItemClickHook()
     elseif event == "AUCTION_HOUSE_SHOW" then if settings().openWithAuctionHouse then self:Show() end
     elseif event == "AUCTION_HOUSE_CLOSED" then self:Hide()
-    elseif event == "BAG_UPDATE_DELAYED" or event == "GET_ITEM_INFO_RECEIVED" then self:Refresh() end
+    elseif event == "BAG_UPDATE_DELAYED" or event == "PLAYER_MONEY" then
+        if BOD.TradeService then BOD.TradeService:Invalidate() end
+        self:Refresh()
+    elseif event == "GET_ITEM_INFO_RECEIVED" then self:Refresh() end
 end
