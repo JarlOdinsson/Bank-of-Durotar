@@ -14,6 +14,8 @@ Bank of Durotar `0.5.0-beta.3` is a small Auction House helper for WoW Classic A
 
 The addon stores the latest market snapshot plus compact daily averages for up to 1,000 active items over 30 days. Repeated scans build the historical baseline used to judge buys and protect estimates from one-scan spikes. Plan remains the quick workflow. Trades uses stronger multi-day evidence, actual character gold, a reserve, controlled exposure, supported exit ranges, and low/normal profit ranges for exact stackable commodity listings. A recommendation becomes an open trade only when `Track Trade` is clicked. Purchase batches, listings, sales, closing, and abandonment are recorded manually; current market value is never called realized profit. The addon also learns successful and expired auctions whenever the mailbox is opened. Buying, selling, vending, crafting, and all protected actions remain manual.
 
+Shop and Plan share the same acquisition evaluator. It considers whole auction stacks, cumulative cost, conservative resale friction, evidence quality, and available depth. Shop's target is the additional quantity to purchase—not total desired ownership—and its optional budget is a hard spending limit. It recommends stopping before an unsafe price or a price cliff. These are saved-scan estimates, never live listings or guaranteed profit.
+
 The latest successful scan is reused after reopening the Auction House, `/reload`, or logout when the project, region, realm, and faction market scope match. A replacement scan is committed atomically, so cancellation, timeout, invalid data, or closing the Auction House cannot destroy the previous completed snapshot. The sidecar labels cache age and coverage; cached data is never described as live. Refreshes remain manual. Sell Price and selected Trades can run a player-clicked current-item check without pretending the whole market was refreshed.
 
 Freshness is explicit:
@@ -45,13 +47,11 @@ Plan lowers confidence as data ages. Trades defaults to a stricter 12-hour limit
 
 ## Install
 
-Copy the `BankOfDurotar` folder into the active Classic Anniversary `Interface/AddOns` directory, then run `/reload`.
-
-When developing with a directory junction from `Interface/AddOns/BankOfDurotar` to the repository, edit and commit the repository only—the live addon updates through the junction automatically.
+Copy the `BankOfDurotar` folder into the active Classic Anniversary `Interface/AddOns` directory, then run `/reload`. After upgrading to beta.3, run one fresh player-clicked market scan to populate Shop's bounded listing depth; an older cached scan remains usable but contains only its cheapest known stack.
 
 ## Repository workflow
 
-Use one canonical working copy for development. Avoid copying files back and forth between multiple clones because that can lose commits, tests, or documentation.
+Use one canonical working copy for development and Git publishing. Treat any game AddOns folder or separate build folder as a deployment destination only: copy outward from the canonical repository and never copy deployment files back over development. This avoids losing commits, tests, or documentation.
 
 To publish with GitHub Desktop:
 
@@ -85,6 +85,7 @@ Open the Auction House and confirm:
 - A canceled, interrupted, or invalid refresh continues using the previous completed scan.
 - Data from another realm or faction is not reused.
 - `SCAN MARKET` starts exactly one scan or clearly shows Blizzard's cooldown.
+- The first completed beta.3 scan populates bounded Shop depth; an older cached scan explicitly asks for a fresh scan instead of inventing missing listings.
 - A completed scan opens `Gold Plan` with the saved budget.
 - The plan shows no more than ten ranked buys and their combined cost never exceeds the budget.
 - The first buy is visually featured and shows icon/name, exact quantity, owned count, maximum price, conservative profit, trust, main risk, and latest-scan wording.
