@@ -1,6 +1,7 @@
 local BOD = {
     db = {
         marketData = {},
+        settings = { reuseLastCompletedScan = true, retainLatestSnapshotPerMarketScope = true },
     },
 }
 
@@ -23,6 +24,9 @@ end
 function UnitFactionGroup()
     return "Horde"
 end
+function GetCurrentRegion()
+    return 1
+end
 
 local currentTime = 1700000000
 function time()
@@ -30,8 +34,10 @@ function time()
     return currentTime
 end
 
-local chunk = assert(loadfile("MarketData.lua"))
-chunk("BankOfDurotar", BOD)
+local cacheChunk = assert(loadfile("MarketCache.lua"))
+cacheChunk("BankOfDurotar", BOD)
+local marketChunk = assert(loadfile("MarketData.lua"))
+marketChunk("BankOfDurotar", BOD)
 
 local function assertEquals(actual, expected, label)
     if actual ~= expected then
@@ -90,6 +96,7 @@ BOD.MarketData:ObserveListing({ name = "Overflow", stackCount = 1, buyoutTotal =
 
 local snapshot = assert(BOD.MarketData:FinalizeSnapshot({
     state = "COMPLETED",
+    queryAccepted = true,
     resultCount = 10,
     processedRecords = 10,
 }))
@@ -98,8 +105,8 @@ local variant = snapshot.items["itemString:1000:15:0:0:0:0:0:0::::"]
 
 assertTruthy(item, "aggregated item")
 assertTruthy(variant, "variant item")
-assertEquals(snapshot.schemaVersion, 3, "schema version")
-assertEquals(snapshot.realmKey, "5:Test_Realm:Horde", "realm key")
+assertEquals(snapshot.schemaVersion, 4, "schema version")
+assertEquals(snapshot.marketScopeKey, "5:1:Test_Realm:faction-Horde", "market scope key")
 assertEquals(snapshot.scanCompletenessFlag, true, "scan completeness")
 assertEquals(snapshot.scanAuctionCount, 10, "scan auction count")
 assertEquals(snapshot.itemCount, 2, "snapshot item count")
@@ -121,6 +128,9 @@ assertEquals(item.totalQuantity, 6, "total quantity")
 assertEquals(item.listingCount, 3, "listing count")
 assertEquals(item.sampleCount, 3, "sample count")
 assertEquals(item.vendorPrice, 13, "vendor price")
+assertEquals(#item.acquisitionGroups, 3, "bounded acquisition price groups")
+assertEquals(item.acquisitionGroups[1].stackSize, 2, "acquisition groups sorted by unit price")
+assertEquals(item.acquisitionGroups[1].buyoutTotal, 200, "acquisition group preserves exact stack total")
 assertEquals(variant.lowestUnitBuyout, 500, "variant separated")
 
 BOD.MarketData:StartSnapshot({ test = "failed" })
@@ -128,12 +138,12 @@ BOD.MarketData:ObserveListing({ itemID = 999, name = "Failed Scan Item", stackCo
 local failedSnapshot, failure = BOD.MarketData:FinalizeSnapshot({ state = "FAILED", resultCount = 1 })
 assertEquals(failedSnapshot, nil, "failed scan not persisted")
 assertTruthy(failure, "failed scan reason")
-assertEquals(BOD.db.marketData.currentSnapshot.id, snapshot.id, "failed scan leaves previous current snapshot")
+assertEquals(BOD.MarketData:GetLatestSnapshot().id, snapshot.id, "failed scan leaves previous completed snapshot")
 
 BOD.MarketData:StartSnapshot({ test = "replacement" })
 BOD.MarketData:ObserveListing({ itemID = 765, name = "Silverleaf", stackCount = 1, buyoutTotal = 25, maxStack = 20 })
-local replacement = assert(BOD.MarketData:FinalizeSnapshot({ state = "COMPLETED", resultCount = 1 }))
-assertEquals(BOD.db.marketData.currentSnapshot.id, replacement.id, "completed scan replaces current snapshot")
+local replacement = assert(BOD.MarketData:FinalizeSnapshot({ state = "COMPLETED", queryAccepted = true, resultCount = 1, processedRecords = 1 }))
+assertEquals(BOD.MarketData:GetLatestSnapshot().id, replacement.id, "completed scan replaces scoped snapshot")
 assertEquals(BOD.db.marketData.currentByRealm, nil, "no duplicated realm snapshot table")
 
 print("market_data_test.lua: PASS")

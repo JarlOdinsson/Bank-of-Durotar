@@ -1,5 +1,9 @@
 # Recommendation Accuracy
 
+## Cached snapshot linkage
+
+Every new Plan or Trade recommendation retains its source scan ID, source completion timestamp, observed unit price, maximum acceptable price, and generation timestamp. Sell also records when a targeted-item overlay supplied the actionable price. A newer full scan regenerates advice rather than relabeling an old recommendation. See `MARKET_CACHE.md` for exact freshness boundaries.
+
 ## Milestone A implementation
 
 The production recommendation path now runs through `RecommendationPolicy.lua`. Candidates must pass freshness, positive-profit, configurable absolute-profit, maximum-price, vendor-value, conservative relisting, evidence, manipulation, and owned-bag exposure gates before they can appear. Passing candidates receive `Strong`, `Fair`, or `Speculative`; rejected candidates are `Avoid` internally and contribute a plain-language empty-state reason.

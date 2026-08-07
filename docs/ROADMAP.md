@@ -1,10 +1,25 @@
 # Product Roadmap
 
+## Delivered in 0.5.0-beta.3
+
+- Dedicated exact-item Shop workflow with optional additional quantity and budget.
+- Bounded seller-free acquisition depth, whole-stack cumulative cost, conservative stop, and price-cliff detection.
+- Shared acquisition evaluator for Shop and Plan with explicit confidence/depth-adjusted capital efficiency.
+
+## Delivered in 0.5.0-beta.2
+
+- Scope-isolated latest-completed snapshot cache with migration and bounded retention.
+- Atomic candidate validation preserving the previous snapshot after interrupted or invalid scans.
+- Central Fresh, Recent, Aging, Stale, and Historical-only classifications.
+- Cache age/coverage UI, exact completion tooltip, and manual refresh action.
+- Separate short-lived targeted-item overlays for Sell and selected Trades.
+- Recommendation source linkage and feature-specific age policies.
+
 ## Trades vertical slice — implemented, offline validated, in-game validation pending
 
 The first Trades milestone now includes dedicated navigation/view, shared analysis, separate Quick Move and Trade policies, candidate routing, deterministic demand/confidence, capital modes, Best Trade plus two alternatives, explicit tracking, manual lifecycle actions, multiple purchase batches, weighted/remaining cost basis, manual partial sales, realized profit, bounded history, Trade Rules, freshness checks, tests, and documentation.
 
-Later Trades work: retain a bounded price ladder for supported multi-listing position sizing, verify read-only owned-auction data, add optional reliable mailbox reconciliation, expose more than two history rows, and calibrate thresholds from live play. None of those are prerequisites for testing this conservative exact-listing vertical slice.
+Later Trades work: use the new bounded acquisition ladder for supported multi-listing trade sizing, verify read-only owned-auction data, add optional reliable mailbox reconciliation, expose more than two history rows, and calibrate thresholds from live play. None of those are prerequisites for testing this conservative exact-listing vertical slice.
 
 ## Ranking method
 

@@ -4,8 +4,9 @@ BOD.MarketData = {
     activeSnapshot = nil,
 }
 
-local MARKET_DATA_SCHEMA_VERSION = 3
+local MARKET_DATA_SCHEMA_VERSION = 4
 local MAX_SAFE_INTEGER = 2147483647
+local MAX_ACQUISITION_GROUPS = 12
 
 local function now()
     if type(time) == "function" then
@@ -20,16 +21,9 @@ local function ensureDB()
     end
 
     BOD.db.marketData = BOD.db.marketData or {}
-    BOD.db.marketData.schemaVersion = MARKET_DATA_SCHEMA_VERSION
-    BOD.db.marketData.latestSnapshotID = BOD.db.marketData.latestSnapshotID or nil
-    BOD.db.marketData.currentSnapshot = BOD.db.marketData.currentSnapshot or nil
-    BOD.db.marketData.currentByRealm = nil
-    BOD.db.marketData.realmOrder = nil
-    if type(BOD.db.marketData.currentSnapshot) ~= "table" then
-        BOD.db.marketData.latestSnapshotID = nil
+    if BOD.MarketCache then
+        BOD.MarketCache:Migrate(BOD.db.marketData, BOD.MarketCache:GetScopeKey(), BOD.MarketCache:GetLegacyScopeKey())
     end
-    BOD.db.marketData.snapshots = nil
-    BOD.db.marketData.maxSnapshots = nil
     return BOD.db.marketData
 end
 
@@ -58,12 +52,7 @@ local function getItemString(itemLink)
 end
 
 local function getRealmKey()
-    local realm = type(GetRealmName) == "function" and GetRealmName() or "unknown-realm"
-    local faction = type(UnitFactionGroup) == "function" and UnitFactionGroup("player") or "unknown-faction"
-    local project = tostring(WOW_PROJECT_ID or "unknown-project")
-    realm = tostring(realm or "unknown-realm"):gsub("%s+", "_")
-    faction = tostring(faction or "unknown-faction")
-    return project .. ":" .. realm .. ":" .. faction
+    return BOD.MarketCache and BOD.MarketCache:GetScopeKey() or "unknown-scope"
 end
 
 local function getItemIdentity(result)
@@ -125,6 +114,22 @@ local function weightedMedian(samples)
 end
 
 local function compactItem(key, aggregate)
+    local acquisitionGroups = {}
+    for _, group in pairs(aggregate.acquisitionGroups or {}) do
+        acquisitionGroups[#acquisitionGroups + 1] = {
+            stackSize = group.stackSize,
+            buyoutTotal = group.buyoutTotal,
+            listingCount = group.listingCount,
+        }
+    end
+    table.sort(acquisitionGroups, function(left, right)
+        local leftCost = left.buyoutTotal * right.stackSize
+        local rightCost = right.buyoutTotal * left.stackSize
+        if leftCost ~= rightCost then return leftCost < rightCost end
+        if left.buyoutTotal ~= right.buyoutTotal then return left.buyoutTotal < right.buyoutTotal end
+        return left.stackSize < right.stackSize
+    end)
+    while #acquisitionGroups > MAX_ACQUISITION_GROUPS do table.remove(acquisitionGroups) end
     return {
         itemKey = key,
         itemID = aggregate.itemID,
@@ -140,10 +145,17 @@ local function compactItem(key, aggregate)
         vendorPrice = aggregate.vendorPrice or 0,
         maxStack = aggregate.maxStack or 1,
         equipSlot = aggregate.equipSlot,
+        -- Seller-free, bounded price depth for manual acquisition planning. This is
+        -- an aggregate of identical stack/total pairs, never raw auction records.
+        acquisitionGroups = acquisitionGroups,
     }
 end
 
 function BOD.MarketData:GetRealmKey()
+    return getRealmKey()
+end
+
+function BOD.MarketData:GetMarketScopeKey()
     return getRealmKey()
 end
 
@@ -152,6 +164,7 @@ function BOD.MarketData:StartSnapshot(metadata)
         id = tostring(now()) .. "-" .. tostring(math.random(1000, 9999)),
         startedAt = now(),
         source = "full-scan-probe",
+        marketScopeKey = getRealmKey(),
         metadata = metadata or {},
         items = {},
         acceptedRecords = 0,
@@ -234,6 +247,7 @@ function BOD.MarketData:ObserveListing(result)
             unitBuyouts = {},
             weightedUnitBuyouts = {},
             priceLevels = {},
+            acquisitionGroups = {},
         }
         self.activeSnapshot.items[key] = aggregate
     end
@@ -274,6 +288,17 @@ function BOD.MarketData:ObserveListing(result)
         quantity = stackCount,
     }
     aggregate.priceLevels[unitBuyout] = true
+    local groupKey = tostring(stackCount) .. ":" .. tostring(buyoutTotal)
+    local group = aggregate.acquisitionGroups[groupKey]
+    if group then
+        group.listingCount = group.listingCount + 1
+    else
+        aggregate.acquisitionGroups[groupKey] = {
+            stackSize = stackCount,
+            buyoutTotal = buyoutTotal,
+            listingCount = 1,
+        }
+    end
     self.activeSnapshot.acceptedRecords = self.activeSnapshot.acceptedRecords + 1
 end
 
@@ -287,7 +312,12 @@ function BOD.MarketData:FinalizeSnapshot(scanSummary)
     end
 
     local snapshot = self.activeSnapshot
-    local scanAuctionCount = tonumber(scanSummary.resultCount or scanSummary.processedRecords) or 0
+    local scanAuctionCount = toWholeNumber(scanSummary.resultCount or scanSummary.processedRecords)
+    local processedRecords = toWholeNumber(scanSummary.processedRecords)
+    if scanSummary.queryAccepted ~= true or not scanAuctionCount or not processedRecords or processedRecords ~= scanAuctionCount then
+        self:AbortSnapshot("Completed scan did not contain structural completion evidence.")
+        return nil, "Completed scan did not contain structural completion evidence."
+    end
     local items = {}
     local itemCount = 0
     for key, aggregate in pairs(snapshot.items) do
@@ -295,21 +325,38 @@ function BOD.MarketData:FinalizeSnapshot(scanSummary)
         itemCount = itemCount + 1
     end
 
+    local completedAt = now()
+    if scanAuctionCount > 0 and snapshot.acceptedRecords <= 0 then
+        self:AbortSnapshot("Completed scan contained no valid auction records.")
+        return nil, "Completed scan contained no valid auction records."
+    end
+    if snapshot.marketScopeKey ~= getRealmKey() then
+        self:AbortSnapshot("Market scope changed before scan completion.")
+        return nil, "Market scope changed before scan completion."
+    end
     local record = {
         schemaVersion = MARKET_DATA_SCHEMA_VERSION,
         id = snapshot.id,
         scanId = snapshot.id,
-        realmKey = getRealmKey(),
+        marketScopeKey = snapshot.marketScopeKey,
         source = snapshot.source,
         startedAt = snapshot.startedAt,
-        completedAt = now(),
-        observationTimestamp = now(),
+        completedAt = completedAt,
+        observationTimestamp = completedAt,
+        durationSeconds = math.max(0, completedAt - (tonumber(snapshot.startedAt) or completedAt)),
+        scanType = "FULL_MARKET",
+        addonSchemaVersion = 13,
+        clientFlavor = tostring(WOW_PROJECT_ID or "unknown-project"),
         scanAuctionCount = scanAuctionCount,
         auctionCount = scanAuctionCount,
         scanCompletenessFlag = true,
         complete = true,
+        completedNormally = true,
+        coverageStatus = "COMPLETE",
+        warningCount = snapshot.rejectedRecords,
         itemCount = itemCount,
         uniqueItemCount = itemCount,
+        observedItemCount = itemCount,
         recordsAccepted = snapshot.acceptedRecords,
         recordsRejected = snapshot.rejectedRecords,
         rejected = snapshot.rejected,
@@ -317,11 +364,15 @@ function BOD.MarketData:FinalizeSnapshot(scanSummary)
         note = "Current compact aggregate snapshot only; raw auction listings and history are not persisted.",
     }
     local db = ensureDB()
-    db.currentSnapshot = record
-    db.latestSnapshotID = record.id
-
+    local structurallyValid, validationError = BOD.MarketCache:ValidateSnapshot(record, snapshot.marketScopeKey)
+    if not structurallyValid then self.activeSnapshot = nil; return nil, validationError end
+    if BOD.db and BOD.db.settings and BOD.db.settings.retainLatestSnapshotPerMarketScope == false then
+        BOD.MarketCache:Clear(db)
+    end
+    local committed, commitError = BOD.MarketCache:Commit(db, record, snapshot.marketScopeKey)
     self.activeSnapshot = nil
-    return record, nil
+    if not committed then return nil, commitError end
+    return committed, nil
 end
 
 function BOD.MarketData:AbortSnapshot(reason)
@@ -331,11 +382,38 @@ end
 
 function BOD.MarketData:GetLatestSnapshot()
     local db = ensureDB()
-    local snapshot = db.currentSnapshot
-    if snapshot and snapshot.realmKey == getRealmKey() then
-        return snapshot
+    local settings = BOD.db and BOD.db.settings or nil
+    return BOD.MarketCache:Get(db, getRealmKey(), settings)
+end
+
+function BOD.MarketData:GetCacheStatus(currentTime)
+    return BOD.MarketCache:GetStatus(self:GetLatestSnapshot(), BOD.db and BOD.db.settings, currentTime)
+end
+
+function BOD.MarketData:GetTargetedOverlay(itemKey, currentTime)
+    return BOD.MarketCache:GetOverlay(ensureDB(), getRealmKey(), itemKey, currentTime)
+end
+
+function BOD.MarketData:RecordTargetedOverlay(itemKey, item, checkedAt)
+    local snapshot = self:GetLatestSnapshot()
+    return BOD.MarketCache:RecordOverlay(ensureDB(), getRealmKey(), itemKey, item, checkedAt, snapshot and (snapshot.scanId or snapshot.id))
+end
+
+function BOD.MarketData:ClearTargetedOverlay(itemKey)
+    BOD.MarketCache:ClearOverlay(ensureDB(), getRealmKey(), itemKey)
+end
+
+function BOD.MarketData:ClearCachedSnapshots(currentScopeOnly)
+    BOD.MarketCache:Clear(ensureDB(), currentScopeOnly and getRealmKey() or nil)
+    if BOD.TradeService then BOD.TradeService:Invalidate() end
+end
+
+function BOD.MarketData:ConsumeCacheWarning()
+    local db = ensureDB()
+    if db.cacheLoadWarningPending then
+        db.cacheLoadWarningPending = nil
+        return "The previous market snapshot could not be loaded. Run a new scan to rebuild it."
     end
-    return nil
 end
 
 function BOD.MarketData:GetSnapshotTimestamp()

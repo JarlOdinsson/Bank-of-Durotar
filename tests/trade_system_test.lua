@@ -96,6 +96,8 @@ expect(not BOD.TradePolicy:Evaluate(copy(base, { fastExitUnitPrice = 5100, norma
 expect(not BOD.TradePolicy:Evaluate(copy(base, { listingPurchaseQuantity = 100, listingCapitalRequired = 500000 }), { settings = settings, capitalLimits = limits }).actionable, "excessive exposure rejected")
 expect(BOD.TradePolicy:Evaluate(copy(base, { discountRate = 0.70, stabilityRate = 0.80 }), { settings = settings, capitalLimits = limits }).rejectionCode == "PRICE_MAY_BE_MANIPULATED", "thin manipulation rejected")
 expect(not BOD.TradePolicy:Evaluate(copy(base, { dataAgeSeconds = 43201 }), { settings = settings, capitalLimits = limits }).actionable, "stale data rejected")
+local agingTrade = BOD.TradePolicy:Evaluate(copy(base, { dataAgeSeconds = 14401 }), { settings = settings, capitalLimits = limits })
+expect(not agingTrade.actionable and agingTrade.rejectionCode == "POSITION_TOO_LARGE", "aging data halves Trade capital exposure")
 expect(not BOD.TradePolicy:Evaluate(copy(base, { fastExitUnitPrice = 4900 }), { settings = settings, capitalLimits = limits }).actionable, "unsupported exit rejected")
 expect(not BOD.TradePolicy:Evaluate(copy(base, { estimatedDepositPerListing = 2000 }), { settings = settings, capitalLimits = limits }).actionable, "relisting loss rejected")
 

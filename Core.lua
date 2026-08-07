@@ -1,16 +1,17 @@
 local addonName, BOD = ...
 
 BOD.addonName = addonName
-BOD.version = "0.5.0-beta.1"
+BOD.version = "0.5.0-beta.3"
 BOD.db = nil
 BOD.lastError = nil
 
 local DEFAULT_DB = {
-    schemaVersion = 12,
+    schemaVersion = 13,
     marketData = {
-        schemaVersion = 3,
-        latestSnapshotID = nil,
-        currentSnapshot = nil,
+        schemaVersion = 4,
+        snapshotsByScope = {},
+        scopeOrder = {},
+        targetedByScope = {},
     },
     scan = {
         schemaVersion = 1,
@@ -57,6 +58,7 @@ local DEFAULT_DB = {
             minimumObservationCount = 5,
             showSpeculativeTrades = false,
             tradeHistoryRetention = 50,
+            maximumTradeDataAgeSeconds = 43200,
         },
     },
     settings = {
@@ -72,6 +74,20 @@ local DEFAULT_DB = {
         guidedStep = 1,
         goldBudgetCopper = 1000000,
         minimumExpectedProfitCopper = 1000,
+        shopBudgetCopper = 0,
+        shopTargetQuantity = 0,
+        reuseLastCompletedScan = true,
+        automaticallyScanWhenNoCacheExists = false,
+        automaticallyRefreshOldCache = false,
+        automaticRefreshAgeSeconds = 14400,
+        marketFreshThresholdSeconds = 3600,
+        marketRecentThresholdSeconds = 14400,
+        marketAgingThresholdSeconds = 43200,
+        marketStaleThresholdSeconds = 86400,
+        maximumTradeDataAgeSeconds = 43200,
+        maximumSellRecommendationAgeSeconds = 3600,
+        showCachedDataWarnings = true,
+        retainLatestSnapshotPerMarketScope = true,
         sidecarPosition = {
             point = "CENTER",
             relativePoint = "CENTER",
@@ -102,27 +118,20 @@ end
 
 function BOD:InitializeDatabase()
     BankOfDurotarDB = copyDefaults(type(BankOfDurotarDB) == "table" and BankOfDurotarDB or {}, DEFAULT_DB)
-    BankOfDurotarDB.schemaVersion = 12
+    BankOfDurotarDB.schemaVersion = 13
 
     -- Remove data used only by the retired developer probes.
     BankOfDurotarDB.diagnostics = nil
 
     local marketData = BankOfDurotarDB.marketData
-    local oldMarketSchema = tonumber(marketData.schemaVersion) or 0
-    marketData.schemaVersion = 3
-    if oldMarketSchema ~= 3 then
-        -- Alpha snapshots duplicated large records. Start clean with the compact release schema.
-        marketData.currentSnapshot = nil
-        marketData.latestSnapshotID = nil
+    if BOD.MarketCache then
+        BOD.MarketCache:Migrate(marketData, BOD.MarketCache:GetScopeKey(), BOD.MarketCache:GetLegacyScopeKey())
+    else
+        marketData.schemaVersion = 4
+        marketData.snapshotsByScope = type(marketData.snapshotsByScope) == "table" and marketData.snapshotsByScope or {}
+        marketData.scopeOrder = type(marketData.scopeOrder) == "table" and marketData.scopeOrder or {}
+        marketData.targetedByScope = type(marketData.targetedByScope) == "table" and marketData.targetedByScope or {}
     end
-    if type(marketData.currentSnapshot) ~= "table" then
-        marketData.currentSnapshot = nil
-        marketData.latestSnapshotID = nil
-    end
-    marketData.currentByRealm = nil
-    marketData.realmOrder = nil
-    marketData.snapshots = nil
-    marketData.maxSnapshots = nil
 
     local scan = BankOfDurotarDB.scan
     scan.schemaVersion = 1
@@ -178,6 +187,7 @@ function BOD:InitializeDatabase()
     tradeSettings.minimumDiscountPercent = math.max(0, math.min(90, math.floor(tonumber(tradeSettings.minimumDiscountPercent) or 15)))
     tradeSettings.minimumObservationCount = math.max(1, math.min(30, math.floor(tonumber(tradeSettings.minimumObservationCount) or 5)))
     tradeSettings.tradeHistoryRetention = math.max(1, math.min(500, math.floor(tonumber(tradeSettings.tradeHistoryRetention) or 50)))
+    tradeSettings.maximumTradeDataAgeSeconds = math.max(0, math.min(86400, math.floor(tonumber(tradeSettings.maximumTradeDataAgeSeconds) or 43200)))
 
     local settings = BankOfDurotarDB.settings
     settings.sidecarPosition = type(settings.sidecarPosition) == "table" and settings.sidecarPosition or copyDefaults({}, DEFAULT_DB.settings.sidecarPosition)
@@ -188,6 +198,18 @@ function BOD:InitializeDatabase()
     else
         settings.goldBudgetCopper = math.max(0, math.min(2147483647, math.floor(tonumber(settings.goldBudgetCopper) or 1000000)))
         settings.minimumExpectedProfitCopper = math.max(0, math.min(2147483647, math.floor(tonumber(settings.minimumExpectedProfitCopper) or 1000)))
+    end
+    settings.reuseLastCompletedScan = settings.reuseLastCompletedScan ~= false
+    settings.automaticallyScanWhenNoCacheExists = settings.automaticallyScanWhenNoCacheExists == true
+    settings.automaticallyRefreshOldCache = settings.automaticallyRefreshOldCache == true
+    settings.showCachedDataWarnings = settings.showCachedDataWarnings ~= false
+    settings.retainLatestSnapshotPerMarketScope = settings.retainLatestSnapshotPerMarketScope ~= false
+    settings.shopBudgetCopper = math.max(0, math.min(2147483647, math.floor(tonumber(settings.shopBudgetCopper) or 0)))
+    settings.shopTargetQuantity = math.max(0, math.min(5000, math.floor(tonumber(settings.shopTargetQuantity) or 0)))
+    for key, fallback in pairs({ automaticRefreshAgeSeconds = 14400, marketFreshThresholdSeconds = 3600,
+        marketRecentThresholdSeconds = 14400, marketAgingThresholdSeconds = 43200, marketStaleThresholdSeconds = 86400,
+        maximumTradeDataAgeSeconds = 43200, maximumSellRecommendationAgeSeconds = 3600 }) do
+        settings[key] = math.max(0, math.min(2147483647, math.floor(tonumber(settings[key]) or fallback)))
     end
     settings.searchText = nil
     settings.lastSearchText = nil
@@ -265,6 +287,9 @@ function BOD:HandleSlashCommand(input)
     elseif command == "buy" or command == "opportunities" then
         self.Sidecar:Show()
         self.Sidecar:SetView("PLAN")
+    elseif command == "shop" then
+        self.Sidecar:Show()
+        self.Sidecar:SetView("SHOP")
     elseif command == "trades" or command == "trade" then
         self.Sidecar:Show()
         self.Sidecar:SetView("TRADES")
@@ -274,6 +299,19 @@ function BOD:HandleSlashCommand(input)
     elseif command == "craft" or command == "crafting" then
         self.Sidecar:Show()
         self.Sidecar:SetView("CRAFT")
+    elseif command == "cache" or command == "cache status" then
+        local status = self.MarketData:GetCacheStatus()
+        if status.available then
+            self:Print(string.format("Cached scan: %s; %d auctions across %d items; completed %s.", status.label:gsub("_", " "), status.auctionCount, status.itemCount, self:FormatTimestamp(status.completedAt)))
+        else
+            self:Print("No completed market snapshot is cached for this market.")
+        end
+    elseif command == "cache clear" then
+        self:Print("This clears cached full-market snapshots and targeted checks, but preserves history and trades. Use /bod cache clear confirm to continue.")
+    elseif command == "cache clear confirm" then
+        self.MarketData:ClearCachedSnapshots(false)
+        self:Print("Cached market snapshots cleared. History and tracked trades were preserved.")
+        if self.Sidecar then self.Sidecar:Refresh() end
     elseif command == "minimap show" then
         self.MinimapButton:SetShown(true)
     elseif command == "minimap hide" then
@@ -281,7 +319,7 @@ function BOD:HandleSlashCommand(input)
     elseif command == "minimap reset" then
         self.MinimapButton:ResetPosition()
     elseif command == "help" then
-        self:Print("/bod - open | /bod scan | /bod buy | /bod trades | /bod sell | /bod craft")
+        self:Print("/bod - open | /bod scan | /bod buy | /bod shop | /bod trades | /bod sell | /bod craft | /bod cache")
         self:Print("/bod minimap show|hide|reset")
     else
         self:Print("Unknown command. Use /bod help.")
@@ -302,6 +340,7 @@ eventFrame:SetScript("OnEvent", function(_, event, ...)
     if BOD.MinimapButton then BOD.MinimapButton:OnEvent(event, ...) end
     if BOD.CraftingService then BOD.CraftingService:OnEvent(event, ...) end
     if BOD.SalesHistory then BOD.SalesHistory:OnEvent(event, ...) end
+    if BOD.TargetedScan then BOD.TargetedScan:OnEvent(event, ...) end
     if BOD.Sidecar then BOD.Sidecar:OnEvent(event, ...) end
     if BOD.FullScanProbe then BOD.FullScanProbe:OnEvent(event, ...) end
 end)

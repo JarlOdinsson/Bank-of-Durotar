@@ -10,6 +10,8 @@ BOD.Sidecar = {
     craftRows = {},
     selectedItemKey = nil,
     selectedItemLink = nil,
+    selectedShopItemKey = nil,
+    selectedShopItemLink = nil,
     selectedTradeId = nil,
     selectedTradeRecommendation = nil,
     tradeActionStatus = nil,
@@ -482,6 +484,7 @@ function BOD.Sidecar:CreateTradeRulesPanel(parent)
     self.tradeMinDiscountBox = editRow("Minimum discount (%)", -228, 52)
     self.tradeMinObservationsBox = editRow("Minimum observations", -256, 52)
     self.tradeRetentionBox = editRow("History entries retained", -284, 52)
+    self.tradeMaxAgeBox = editRow("Maximum scan age (hours)", -312, 52)
 
     local demandLabel = sectionLabel(panel, "Minimum demand")
     demandLabel:SetPoint("TOPLEFT", 300, -88)
@@ -543,6 +546,7 @@ function BOD.Sidecar:RefreshTradeRules()
     self.tradeMinDiscountBox:SetText(tostring(value.minimumDiscountPercent or 15))
     self.tradeMinObservationsBox:SetText(tostring(value.minimumObservationCount or 5))
     self.tradeRetentionBox:SetText(tostring(value.tradeHistoryRetention or 50))
+    self.tradeMaxAgeBox:SetText(tostring(math.floor((value.maximumTradeDataAgeSeconds or 43200) / 3600)))
 end
 
 function BOD.Sidecar:SaveTradeRules()
@@ -556,6 +560,7 @@ function BOD.Sidecar:SaveTradeRules()
     value.minimumDiscountPercent = math.min(90, numeric(self.tradeMinDiscountBox, 15))
     value.minimumObservationCount = math.max(1, math.min(30, numeric(self.tradeMinObservationsBox, 5)))
     value.tradeHistoryRetention = math.max(1, math.min(500, numeric(self.tradeRetentionBox, 50)))
+    value.maximumTradeDataAgeSeconds = math.max(0, math.min(86400, numeric(self.tradeMaxAgeBox, 12) * 3600))
     BOD.TradeService:Invalidate()
     self.tradeRulesStatus:SetText("Rules saved. Recommendations will be recalculated.")
     self:RefreshTradeRules()
@@ -607,6 +612,75 @@ function BOD.Sidecar:CreateCraftPanel(frame, anchor)
     note:SetPoint("TOPLEFT", self.craftRows[CRAFT_ROWS].container, "BOTTOMLEFT", 0, -8)
     note:SetSize(475, 32)
     note:SetText("Profit includes the 5% Auction House cut and modeled deposit loss. Unsold items are still a risk.")
+end
+
+function BOD.Sidecar:CreateShopPanel(frame, anchor)
+    local panel = CreateFrame("Frame", nil, frame)
+    panel:SetPoint("TOPLEFT", anchor, "BOTTOMLEFT", 0, -12)
+    panel:SetSize(488, 460)
+    self.panels.SHOP = panel
+
+    local heading = font(panel, "GameFontNormalLarge")
+    heading:SetPoint("TOPLEFT", 4, -4)
+    heading:SetText("Shop an Item")
+    local intro = font(panel, "GameFontHighlightSmall")
+    intro:SetPoint("TOPLEFT", heading, "BOTTOMLEFT", 0, -7)
+    intro:SetSize(475, 28)
+    intro:SetText("Choose one exact item. This reads the saved scan; every purchase stays manual.")
+
+    self.shopItemBox = CreateFrame("EditBox", nil, panel, "InputBoxTemplate")
+    self.shopItemBox:SetSize(315, 24)
+    self.shopItemBox:SetPoint("TOPLEFT", intro, "BOTTOMLEFT", 3, -8)
+    self.shopItemBox:SetAutoFocus(false)
+    self.shopItemBox:SetScript("OnEnterPressed", function(box) self:SelectShopItem(box:GetText()); box:ClearFocus() end)
+    local find = button(panel, "Find", 68, 24)
+    find:SetPoint("LEFT", self.shopItemBox, "RIGHT", 8, 0)
+    find:SetScript("OnClick", function() self:SelectShopItem(self.shopItemBox:GetText()) end)
+    local drop = button(panel, "Drop", 68, 24)
+    drop:SetPoint("LEFT", find, "RIGHT", 6, 0)
+    drop:RegisterForDrag("LeftButton")
+    local function useCursorItem()
+        local link = cursorItemLink()
+        if link then
+            self:SelectShopItem(link)
+            if type(ClearCursor) == "function" then ClearCursor() end
+        end
+    end
+    drop:SetScript("OnReceiveDrag", useCursorItem)
+    drop:SetScript("OnClick", useCursorItem)
+
+    local targetLabel = sectionLabel(panel, "ADDITIONAL QUANTITY TO BUY")
+    targetLabel:SetPoint("TOPLEFT", self.shopItemBox, "BOTTOMLEFT", -3, -15)
+    self.shopTargetBox = CreateFrame("EditBox", nil, panel, "InputBoxTemplate")
+    self.shopTargetBox:SetSize(70, 24)
+    self.shopTargetBox:SetPoint("TOPLEFT", targetLabel, "BOTTOMLEFT", 3, -5)
+    self.shopTargetBox:SetAutoFocus(false)
+    self.shopTargetBox:SetNumeric(true)
+    self.shopTargetBox:SetText("0")
+    local targetHelp = font(panel, "GameFontDisableSmall")
+    targetHelp:SetPoint("LEFT", self.shopTargetBox, "RIGHT", 9, 0)
+    targetHelp:SetText("0 = buy only the safe value depth")
+
+    local budgetLabel = sectionLabel(panel, "OPTIONAL BUDGET")
+    budgetLabel:SetPoint("TOPLEFT", self.shopTargetBox, "BOTTOMLEFT", -3, -14)
+    self.shopMoneyBoxes = {
+        gold = planMoneyBox(panel, 62, "Gold", "Optional maximum spend for this item."),
+        silver = planMoneyBox(panel, 45, "Silver", "Optional maximum spend for this item."),
+        copper = planMoneyBox(panel, 45, "Copper", "Optional maximum spend for this item."),
+    }
+    self.shopMoneyBoxes.gold:SetPoint("TOPLEFT", budgetLabel, "BOTTOMLEFT", 3, -5)
+    moneySuffix(panel, self.shopMoneyBoxes.gold, "g")
+    self.shopMoneyBoxes.silver:SetPoint("LEFT", self.shopMoneyBoxes.gold, "RIGHT", 25, 0)
+    moneySuffix(panel, self.shopMoneyBoxes.silver, "s")
+    self.shopMoneyBoxes.copper:SetPoint("LEFT", self.shopMoneyBoxes.silver, "RIGHT", 25, 0)
+    moneySuffix(panel, self.shopMoneyBoxes.copper, "c")
+    local evaluate = button(panel, "Evaluate", 92, 24)
+    evaluate:SetPoint("LEFT", self.shopMoneyBoxes.copper, "RIGHT", 28, 0)
+    evaluate:SetScript("OnClick", function() self:SaveShopInputs(); self:RefreshShop() end)
+
+    self.shopText = font(panel, "GameFontHighlightSmall")
+    self.shopText:SetPoint("TOPLEFT", self.shopMoneyBoxes.gold, "BOTTOMLEFT", -3, -14)
+    self.shopText:SetSize(475, 290)
 end
 
 function BOD.Sidecar:CreateSellPanel(frame, anchor)
@@ -687,6 +761,9 @@ function BOD.Sidecar:CreateSellPanel(frame, anchor)
     local stackHelp = font(panel, "GameFontHighlightSmall")
     stackHelp:SetPoint("LEFT", self.sellStackBox, "RIGHT", 10, 0)
     stackHelp:SetText("Type the number in the stack.")
+    self.sellCheckButton = button(panel, "Check Current Item", 130, 24)
+    self.sellCheckButton:SetPoint("LEFT", stackHelp, "RIGHT", 10, 0)
+    self.sellCheckButton:SetScript("OnClick", function() self:CheckSelectedSellItem() end)
 
     local resultLabel = sectionLabel(panel, "3. USE THIS PRICE")
     resultLabel:SetPoint("TOPLEFT", self.sellStackBox, "BOTTOMLEFT", -3, -18)
@@ -700,8 +777,9 @@ function BOD.Sidecar:InstallItemClickHook()
     if self.itemClickHooked or type(hooksecurefunc) ~= "function" or type(HandleModifiedItemClick) ~= "function" then return end
     self.itemClickHooked = true
     hooksecurefunc("HandleModifiedItemClick", function(itemLink)
-        if self.frame and self.frame:IsShown() and self.activeView == "SELL" and type(IsShiftKeyDown) == "function" and IsShiftKeyDown() then
-            self:SelectSellItem(itemLink)
+        if self.frame and self.frame:IsShown() and type(IsShiftKeyDown) == "function" and IsShiftKeyDown() then
+            if self.activeView == "SELL" then self:SelectSellItem(itemLink)
+            elseif self.activeView == "SHOP" then self:SelectShopItem(itemLink) end
         end
     end)
 end
@@ -840,12 +918,27 @@ function BOD.Sidecar:EnsureCreated()
     self.scanButton:SetScript("OnClick", function() self:SaveBudget(false); BOD.FullScanProbe:StartFromPlayerClick() end)
     self.status = font(frame, "GameFontHighlightSmall")
     self.status:SetPoint("TOPLEFT", self.scanButton, "TOPRIGHT", 14, -2)
-    self.status:SetSize(290, 48)
+    self.status:SetSize(195, 48)
+    self.scanDetailsButton = button(frame, "Scan Details", 88, 22)
+    self.scanDetailsButton:SetPoint("TOPRIGHT", self.status, "TOPRIGHT", 96, 0)
+    self.scanDetailsButton:SetScript("OnClick", function() self:ShowScanDetails() end)
+    self.scanDetailsButton:SetScript("OnEnter", function(value)
+        local cache = BOD.MarketData and BOD.MarketData:GetCacheStatus() or nil
+        if not GameTooltip or not cache or not cache.available then return end
+        GameTooltip:SetOwner(value, "ANCHOR_TOP")
+        GameTooltip:SetText("Last completed full scan")
+        GameTooltip:AddLine(BOD:FormatTimestamp(cache.completedAt), 1, 1, 1)
+        GameTooltip:AddLine(tostring(cache.auctionCount) .. " auctions across " .. tostring(cache.itemCount) .. " items", 1, 1, 1)
+        GameTooltip:AddLine("Coverage: " .. tostring(cache.coverageStatus), 1, 1, 1)
+        GameTooltip:AddLine("Cached data is not live.", 1, 0.82, 0, true)
+        GameTooltip:Show()
+    end)
+    self.scanDetailsButton:SetScript("OnLeave", function() if GameTooltip then GameTooltip:Hide() end end)
 
-    local tabs = { { "PLAN", "Plan" }, { "TRADES", "Trades" }, { "CRAFT", "Craft" }, { "SELL", "Sell Price" } }
+    local tabs = { { "PLAN", "Plan" }, { "SHOP", "Shop" }, { "TRADES", "Trades" }, { "CRAFT", "Craft" }, { "SELL", "Sell" } }
     local previous
     for index, tab in ipairs(tabs) do
-        local tabButton = button(frame, tab[2], 112, 28)
+        local tabButton = button(frame, tab[2], 88, 28)
         self.viewButtons[tab[1]] = tabButton
         if index == 1 then tabButton:SetPoint("TOPLEFT", self.scanButton, "BOTTOMLEFT", 0, -12)
         else tabButton:SetPoint("LEFT", previous, "RIGHT", 8, 0) end
@@ -854,6 +947,7 @@ function BOD.Sidecar:EnsureCreated()
     end
 
     self:CreatePlanPanel(frame, self.viewButtons.PLAN)
+    self:CreateShopPanel(frame, self.viewButtons.PLAN)
     self:CreateTradesPanel(frame, self.viewButtons.PLAN)
     self:CreateCraftPanel(frame, self.viewButtons.PLAN)
     self:CreateSellPanel(frame, self.viewButtons.PLAN)
@@ -890,6 +984,7 @@ function BOD.Sidecar:SetView(view)
     self.activeView = view
     settings().sidecarView = view
     if view == "PLAN" then self:LoadPlanMoneyFields() end
+    if view == "SHOP" then self:LoadShopInputs() end
     self:Refresh()
 end
 
@@ -1038,10 +1133,11 @@ function BOD.Sidecar:FindSelectedTrade()
     local trade = self.selectedTradeRecommendation or (self.currentTrades and self.currentTrades.bestTrade)
     if not trade then return end
     local freshness = BOD.TradeService:CheckFreshness(trade)
-    if not freshness.safe then
+    if freshness.state == "STALE" or freshness.state == "SCAN_REQUIRED" then
         self.tradeActionStatus = freshness.message
     else
-        self.tradeActionStatus = "In Blizzard's Auction House, search for " .. tostring(trade.itemName) .. ". Do not pay more than " .. BOD:FormatMoney(trade.maximumBuyUnitPrice) .. " each."
+        local started, message = BOD.TargetedScan:Start(trade.itemKey, trade.itemName, trade.itemID)
+        self.tradeActionStatus = started and (message .. " Do not pay more than " .. BOD:FormatMoney(trade.maximumBuyUnitPrice) .. " each.") or message
     end
     self:RefreshTrades(true)
 end
@@ -1231,6 +1327,111 @@ function BOD.Sidecar:RefreshCraft()
     end
 end
 
+function BOD.Sidecar:LoadShopInputs()
+    if not self.shopMoneyBoxes or not BOD.PlanMoney then return end
+    local values = BOD.PlanMoney:ToFields(settings().shopBudgetCopper or 0)
+    for denomination, box in pairs(self.shopMoneyBoxes) do box:SetText(tostring(values[denomination] or 0)) end
+    if self.shopTargetBox then self.shopTargetBox:SetText(tostring(settings().shopTargetQuantity or 0)) end
+end
+
+function BOD.Sidecar:SaveShopInputs()
+    if not self.shopMoneyBoxes or not BOD.PlanMoney then return end
+    local budget = BOD.PlanMoney:NormalizeFields(self.shopMoneyBoxes.gold:GetText(),
+        self.shopMoneyBoxes.silver:GetText(), self.shopMoneyBoxes.copper:GetText())
+    settings().shopBudgetCopper = math.min(MAX_SAFE_INTEGER, budget.totalCopper)
+    settings().shopTargetQuantity = math.max(0, math.min(5000,
+        math.floor(tonumber(self.shopTargetBox and self.shopTargetBox:GetText()) or 0)))
+    self:LoadShopInputs()
+end
+
+function BOD.Sidecar:SelectShopItem(text)
+    text = type(text) == "string" and text or ""
+    local hasExactLink = text:match("Hitem:([^|%]]+)") ~= nil
+    local linkedName = text:match("%[([^%]]+)%]")
+    local item = hasExactLink and BOD.MarketData:FindItemByText(text)
+        or BOD.MarketData:FindExactItemByName(linkedName or text)
+    self.selectedShopItemKey = item and item.itemKey or nil
+    self.selectedShopItemLink = item and text or nil
+    if item then
+        local displayName = item.itemName or item.name or item.itemKey
+        self.shopItemBox:SetText(tostring(displayName))
+    else
+        self.shopItemBox:SetText(text)
+    end
+    self:RefreshShop()
+end
+
+function BOD.Sidecar:RefreshShop()
+    if self.activeView ~= "SHOP" then return end
+    if not self.selectedShopItemKey then
+        self.shopText:SetText(table.concat({
+            "Choose an exact item by name, Shift-click its link, or drag it onto Drop.",
+            "",
+            "Equipment variants require an exact item link. If a typed name matches more than one variant, no guess is made.",
+            "A fresh full scan is needed to see multiple listing price levels.",
+        }, "\n"))
+        return
+    end
+    local snapshot = BOD.MarketData:GetLatestSnapshot()
+    local item = BOD.MarketData:GetCurrentItem(self.selectedShopItemKey)
+    if not snapshot or not item then
+        self.shopText:SetText("That exact item is not present in the saved market scan. Scan again or choose another item.")
+        return
+    end
+    local ownedInventory = BOD.GoldPlan:CollectBagInventory()
+    local ownedQuantities = {}
+    for itemKey, entry in pairs(ownedInventory) do ownedQuantities[itemKey] = tonumber(entry.ownedQuantity) or 0 end
+    local result = BOD.AcquisitionEvaluator:EvaluateItem(self.selectedShopItemKey, item, snapshot, {
+        targetQuantity = settings().shopTargetQuantity or 0,
+        budgetCopper = settings().shopBudgetCopper or 0,
+        context = { ownedQuantities = ownedQuantities },
+    })
+    local lines = {
+        "|cffffd100" .. tostring(result.itemName or item.itemName or self.selectedShopItemKey) .. "|r",
+        "Exact market identity: " .. tostring(self.selectedShopItemKey),
+        "You own: " .. tostring(result.ownedQuantity or 0) .. "  ·  Saved scan age: " .. ageLabel(result.dataAgeSeconds),
+        "Fair value: " .. BOD:FormatMoney(result.fairValue or 0) .. " each"
+            .. (result.historicalValue and ("  ·  7-day: " .. BOD:FormatMoney(result.historicalValue)) or ""),
+        "Evidence: " .. tostring(result.confidence or "unknown"):lower()
+            .. "  ·  Demand: " .. tostring(result.demand or "unknown"):lower(),
+        "",
+    }
+    if result.purchaseQuantity and result.purchaseQuantity > 0 then
+        lines[#lines + 1] = "Buy " .. tostring(result.purchaseQuantity) .. " for " .. BOD:FormatMoney(result.capitalRequired)
+            .. "  ·  Average " .. BOD:FormatMoney(result.averageUnitCost) .. " each"
+        lines[#lines + 1] = "Stop above " .. BOD:FormatMoney(result.safeCeiling) .. " each"
+            .. (result.cliffUnitPrice and ("  ·  Price cliff at " .. BOD:FormatMoney(result.cliffUnitPrice)) or "")
+        lines[#lines + 1] = "Conservative value after resale friction: " .. BOD:FormatMoney(result.conservativeUnitValue) .. " each"
+        lines[#lines + 1] = "Conservative profit: about " .. BOD:FormatMoney(result.conservativeProfit)
+            .. "  ·  Capital efficiency: " .. string.format("%.1f%%", (result.capitalEfficiencyBps or 0) / 100)
+        if result.status == "TARGET_UNMET" then
+            lines[#lines + 1] = "|cffffa040Target not met within the safe listings and budget.|r"
+        elseif result.status == "LOW_CONFIDENCE" then
+            lines[#lines + 1] = "|cffffa040Low-confidence context only. No buy recommendation is made.|r"
+        end
+    else
+        lines[#lines + 1] = "No saved listing is below the conservative stop price. Keep your gold."
+    end
+    if (tonumber(result.dataAgeSeconds) or 0) > 43200 then
+        lines[#lines + 1] = "|cffff4040Warning: this snapshot is stale enough that listings may have changed.|r"
+    end
+    if result.legacyDepthFallback then
+        lines[#lines + 1] = "|cffffa040This older snapshot has only the cheapest stack. Run a fresh scan for depth.|r"
+    end
+    lines[#lines + 1] = ""
+    lines[#lines + 1] = "Saved listing groups (manual buys):"
+    for index, group in ipairs(result.offerGroups or {}) do
+        if index > 6 then lines[#lines + 1] = "…and " .. tostring(#result.offerGroups - 6) .. " more price groups"; break end
+        local selected = tonumber(result.selectedCounts and result.selectedCounts[index]) or 0
+        local marker = selected > 0 and ("BUY " .. tostring(selected) .. "/" .. tostring(group.listingCount)) or "skip"
+        lines[#lines + 1] = string.format("%s · %dx%d · %s total · %s each", marker,
+            tonumber(group.listingCount) or 0, tonumber(group.stackSize) or 0,
+            BOD:FormatMoney(group.buyoutTotal), BOD:FormatMoney(group.unitPrice))
+    end
+    lines[#lines + 1] = "Nothing here clicks, buys, bids, or searches the Auction House for you."
+    self.shopText:SetText(table.concat(lines, "\n"))
+end
+
 function BOD.Sidecar:SelectSellItem(text)
     local item = BOD.MarketData:FindItemByText(text)
     self.selectedItemKey = item and item.itemKey or nil
@@ -1261,8 +1462,9 @@ end
 
 function BOD.Sidecar:RefreshSell()
     if self.activeView ~= "SELL" then return end
+    if self.sellCheckButton then self.sellCheckButton:SetEnabled(self.selectedItemKey ~= nil and not (BOD.TargetedScan and BOD.TargetedScan.active)) end
     if not self.selectedItemKey then self.sellText:SetText("Choose an item in step 1. Your selling price will appear here."); return end
-    local recommendation = BOD.PricingService:GetRecommendation(self.selectedItemKey, tonumber(self.sellStackBox:GetText()) or 1, { strategy = "SMALL_UNDERCUT" })
+    local recommendation = BOD.PricingService:GetRecommendation(self.selectedItemKey, tonumber(self.sellStackBox:GetText()) or 1, { strategy = "SMALL_UNDERCUT", requireCurrentValidation = true, useTargetedOverlay = true })
     if recommendation.status == "RECOMMENDED" then
         self.sellText:SetText(table.concat({
             "|cffffd100LIST THE WHOLE STACK FOR " .. BOD:FormatMoney(recommendation.stackBuyout) .. "|r",
@@ -1273,28 +1475,57 @@ function BOD.Sidecar:RefreshSell()
             "2. Type " .. BOD:FormatMoney(recommendation.stackBuyout) .. " for both Bid and Buyout.",
             "3. Click Create Auction.",
             "",
-            "Price confidence: " .. tostring(recommendation.confidence):lower() .. " · Scan age: " .. ageLabel(recommendation.dataAgeSeconds),
+            "Price confidence: " .. tostring(recommendation.confidence):lower() .. " · Full scan age: " .. ageLabel(recommendation.dataAgeSeconds),
+            recommendation.targetedValidationAt and ("Current item checked: " .. ageLabel(math.max(0, (type(time) == "function" and time() or os.time()) - recommendation.targetedValidationAt)) .. " ago") or "",
         }, "\n"))
+    elseif recommendation.status == "VALIDATION_REQUIRED" then
+        self.sellText:SetText("Cached price context: " .. BOD:FormatMoney(recommendation.cachedUnitBuyout) .. " each.\n\nThis full-market scan is " .. ageLabel(recommendation.dataAgeSeconds) .. " old. Check this item before using a posting price.")
     elseif recommendation.status == "REFRESH_DATA" then self.sellText:SetText("Your market data is old. Scan again before listing this item.")
     elseif recommendation.status == "INVALID_QUANTITY" then self.sellText:SetText("Enter the actual stack size.")
     else self.sellText:SetText("There is not enough reliable market data for this item yet.") end
+end
+
+function BOD.Sidecar:CheckSelectedSellItem()
+    if not self.selectedItemKey then return end
+    local item = BOD.MarketData:GetCurrentItem(self.selectedItemKey)
+    local ok, message = BOD.TargetedScan:Start(self.selectedItemKey, item and (item.itemName or item.name), item and item.itemID)
+    self.sellText:SetText(message or (ok and "Checking item..." or "Unable to check this item."))
+end
+
+function BOD.Sidecar:ShowScanDetails()
+    local cache = BOD.MarketData and BOD.MarketData:GetCacheStatus() or nil
+    if not cache or not cache.available then BOD:Print("No valid completed market scan is cached for this market."); return end
+    BOD:Print(string.format("Cached full scan %s: %d auctions across %d items; coverage %s; completed %s.", cache.ageText, cache.auctionCount, cache.itemCount, tostring(cache.coverageStatus), BOD:FormatTimestamp(cache.completedAt)))
 end
 
 function BOD.Sidecar:Refresh()
     if not self.frame or not self.frame:IsShown() then return end
     self:ShowView()
     local lines, cooldown = BOD.FullScanProbe:GetCooldownStatusLines()
+    local cache = BOD.MarketData and BOD.MarketData:GetCacheStatus() or nil
+    if not BOD.FullScanProbe.active and cache and cache.available then
+        lines = { cache.message, tostring(cache.auctionCount) .. " auctions · " .. tostring(cache.itemCount) .. " items" }
+    end
     self.status:SetText(table.concat(lines, "\n"))
-    self.scanButton:SetText(BOD.FullScanProbe:GetPrimaryButtonText())
+    self.scanButton:SetText(BOD.FullScanProbe.active and "CANCEL SCAN" or (cache and cache.available and "REFRESH SCAN" or "SCAN MARKET"))
+    self.scanDetailsButton:SetEnabled(cache and cache.available or false)
     self.scanButton:SetEnabled(BOD.FullScanProbe.active or (cooldown.state == "READY" and cooldown.canQueryAll == true))
-    self:RefreshPlan(); self:RefreshTrades(); self:RefreshCraft(); self:RefreshSell()
+    if BOD.FullScanProbe.active then
+        self:RefreshGuide()
+        return
+    end
+    self:RefreshPlan(); self:RefreshShop(); self:RefreshTrades(); self:RefreshCraft(); self:RefreshSell()
     self:RefreshGuide()
 end
 
 function BOD.Sidecar:OnEvent(event)
-    if event == "ADDON_LOADED" then self:EnsureCreated()
+    if event == "ADDON_LOADED" then return
     elseif event == "PLAYER_LOGIN" then self:InstallItemClickHook()
-    elseif event == "AUCTION_HOUSE_SHOW" then if settings().openWithAuctionHouse then self:Show() end
+    elseif event == "AUCTION_HOUSE_SHOW" then
+        if BOD.MarketData then BOD.MarketData:GetLatestSnapshot() end
+        local warning = BOD.MarketData and BOD.MarketData:ConsumeCacheWarning() or nil
+        if warning then BOD:Print(warning) end
+        if settings().openWithAuctionHouse then self:Show() end
     elseif event == "AUCTION_HOUSE_CLOSED" then self:Hide()
     elseif event == "BAG_UPDATE_DELAYED" or event == "PLAYER_MONEY" then
         if BOD.TradeService then BOD.TradeService:Invalidate() end

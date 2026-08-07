@@ -188,6 +188,9 @@ function BOD.MarketAnalysis:Analyze(itemKey, item, snapshot, context)
         demand = demand,
         confidence = confidence,
         snapshotId = snapshot.scanId or snapshot.id,
+        sourceScanCompletedAt = snapshot.completedAt,
+        sourceType = "FULL_SCAN_CACHE",
+        freshnessLabel = BOD.MarketCache and BOD.MarketCache:ClassifyAge(age, BOD.db and BOD.db.settings) or nil,
         recommendationTimestamp = referenceTime,
     }
 end

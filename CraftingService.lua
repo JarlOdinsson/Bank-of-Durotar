@@ -158,7 +158,7 @@ function BOD.CraftingService:GetRecommendations(limit, budgetCopper)
             local cooldownRemaining = math.max(0, (tonumber(recipe.cooldownSeconds) or 0) - (now() - (tonumber(recipe.cooldownCheckedAt) or 0)))
             local outputItem = marketItemFor(recipe.outputItemID)
             local outputCount = math.max(1, wholeNumber(recipe.outputCount) or 1)
-            local recommendation = outputItem and BOD.PricingService:GetRecommendation(outputItem.itemKey, outputCount, { strategy = "SMALL_UNDERCUT" }) or nil
+            local recommendation = outputItem and BOD.PricingService:GetRecommendation(outputItem.itemKey, outputCount, { strategy = "SMALL_UNDERCUT", useTargetedOverlay = true }) or nil
             if cooldownRemaining <= 0 and recommendation and recommendation.status == "RECOMMENDED" and recommendation.confidence ~= "LOW" then
                 local reagentCost = 0
                 local complete = true
@@ -198,6 +198,12 @@ function BOD.CraftingService:GetRecommendations(limit, budgetCopper)
                         estimatedAuctionCut = economics.auctionCut,
                         expectedDepositLoss = economics.expectedDepositLoss,
                         personalSales = personalSales,
+                        freshness = recommendation.freshness,
+                        sourceScanId = recommendation.snapshotId,
+                        sourceScanCompletedAt = recommendation.sourceScanCompletedAt,
+                        recommendationTimestamp = now(),
+                        actionable = recommendation.freshness == "FRESH" or recommendation.freshness == "RECENT",
+                        requiresTargetedRefresh = recommendation.freshness == "AGING" or recommendation.freshness == "STALE",
                     }
                 end
             end

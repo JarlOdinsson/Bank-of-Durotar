@@ -24,7 +24,7 @@ local QUERY_PERMISSION_TIMEOUT = 20
 local QUERY_PERMISSION_INTERVAL = 0.5
 local RESULT_TIMEOUT = 120
 local QUIET_WINDOW_SECONDS = 2
-local PROCESS_CHUNK_SIZE = 500
+local PROCESS_CHUNK_SIZE = 100
 local FULL_SCAN_COOLDOWN_ESTIMATE_SECONDS = 900
 local COOLDOWN_POLL_INTERVAL_SECONDS = 1
 
@@ -306,6 +306,10 @@ function BOD.FullScanProbe:ResetForStart()
     self.lastResultEventAt = nil
     self.completionCondition = nil
     self.marketSnapshotID = nil
+    self.cacheContinuationMessage = nil
+    if BOD.AuctionAPI and BOD.AuctionAPI.ResetResultCache then
+        BOD.AuctionAPI:ResetResultCache()
+    end
 end
 
 function BOD.FullScanProbe:StartFromPlayerClick()
@@ -500,9 +504,16 @@ function BOD.FullScanProbe:Finish(state, errorMessage)
     local scanDB = getScanDB()
     scanDB.lastScanState = state
     if state == "COMPLETED" and BOD.MarketData then
-        scanDB.lastCompletedScanAt = self.endedAt
-        local snapshot = BOD.MarketData:FinalizeSnapshot(self:GetScanSummary(state))
+        local snapshot, finalizeError = BOD.MarketData:FinalizeSnapshot(self:GetScanSummary(state))
         self.marketSnapshotID = snapshot and snapshot.id or nil
+        if snapshot then
+            scanDB.lastCompletedScanAt = tonumber(snapshot.completedAt) or self.endedAt
+        else
+            state = "FAILED"
+            errorMessage = finalizeError or "The completed scan candidate was invalid."
+            self.lastError = errorMessage
+            scanDB.lastScanState = state
+        end
         if snapshot and BOD.MarketHistory and BOD.MarketHistory.RecordSnapshot then
             BOD.MarketHistory:RecordSnapshot(snapshot)
         end
@@ -512,6 +523,10 @@ function BOD.FullScanProbe:Finish(state, errorMessage)
         end
     elseif BOD.MarketData then
         BOD.MarketData:AbortSnapshot(errorMessage or state)
+        local previous = BOD.MarketData:GetCacheStatus()
+        if previous and previous.available then
+            self.cacheContinuationMessage = "Refresh interrupted. Continuing to use the previous completed scan from " .. tostring(previous.ageText) .. "."
+        end
     end
     if errorMessage then
         BOD:Log(state == "TIMED_OUT" and "WARN" or "ERROR", "FullScan", errorMessage)
@@ -565,7 +580,7 @@ function BOD.FullScanProbe:GetProgressLine()
     elseif lifecycleState == "COMPLETED" then
         return "Auctions: " .. tostring(self.processedRecords or 0) .. ", Items: " .. tostring(self.uniqueItemCount or 0)
     elseif lifecycleState == "FAILED" or lifecycleState == "TIMED_OUT" then
-        return tostring(self.lastError or "Scan failed")
+        return tostring(self.cacheContinuationMessage or self.lastError or "Scan failed")
     elseif lifecycleState == "CANCELLED" then
         return "Cancelled"
     elseif state == "COOLDOWN" then

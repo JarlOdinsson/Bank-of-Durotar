@@ -161,12 +161,13 @@ end
 
 function BOD.TradeService:CheckFreshness(recommendation, context)
     local snapshot = BOD.MarketData and BOD.MarketData:GetLatestSnapshot() or nil
-    local item = recommendation and BOD.MarketData and BOD.MarketData:GetCurrentItem(recommendation.itemKey) or nil
+    local overlay = recommendation and BOD.MarketData and BOD.MarketData.GetTargetedOverlay and BOD.MarketData:GetTargetedOverlay(recommendation.itemKey) or nil
+    local item = overlay and overlay.item or (recommendation and BOD.MarketData and BOD.MarketData:GetCurrentItem(recommendation.itemKey) or nil)
     local currentTime = context and context.now or (type(time) == "function" and time() or os.time())
     return BOD.RecommendationPolicy:CheckFreshness({
         maximumSafeUnitPrice = recommendation and recommendation.maximumBuyUnitPrice,
         snapshotId = recommendation and recommendation.snapshotId,
-    }, item, snapshot, currentTime, 43200)
+    }, item, snapshot, currentTime, tonumber(tradeSettings().maximumTradeDataAgeSeconds) or 43200)
 end
 
 function BOD.TradeService:Track(recommendation, timestamp)

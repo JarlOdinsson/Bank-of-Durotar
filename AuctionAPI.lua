@@ -2,6 +2,7 @@ local addonName, BOD = ...
 
 BOD.AuctionAPI = {
     auctionHouseOpen = false,
+    itemInfoCache = {},
 }
 
 local function isFunction(name)
@@ -106,6 +107,20 @@ function BOD.AuctionAPI:SendFullScanProbe()
     return true, "legacy getAll probe query sent", signature
 end
 
+function BOD.AuctionAPI:SendTargetedSearch(itemName)
+    if self:GetFamily() ~= "legacy" or not isFunction("QueryAuctionItems") then
+        return false, "Legacy targeted search is unavailable."
+    end
+    local canQuery = self:GetQueryReadiness()
+    if canQuery ~= true then return false, "Auction search is on cooldown." end
+    itemName = type(itemName) == "string" and itemName:gsub("^%s+", ""):gsub("%s+$", "") or ""
+    if itemName == "" then return false, "An exact item name is required." end
+    local signature = [[QueryAuctionItems(itemName, nil, nil, 0, nil, nil, false, false, nil)]]
+    local ok, errorMessage = pcall(QueryAuctionItems, itemName, nil, nil, 0, nil, nil, false, false, nil)
+    if not ok then return false, tostring(errorMessage), signature end
+    return true, "Targeted item search sent.", signature
+end
+
 function BOD.AuctionAPI:GetResultCount()
     if self:GetFamily() ~= "legacy" or not isFunction("GetNumAuctionItems") then
         return 0
@@ -117,6 +132,10 @@ function BOD.AuctionAPI:GetResultCount()
         return 0
     end
     return tonumber(listCount) or 0
+end
+
+function BOD.AuctionAPI:ResetResultCache()
+    self.itemInfoCache = {}
 end
 
 function BOD.AuctionAPI:GetResult(index)
@@ -142,21 +161,22 @@ function BOD.AuctionAPI:GetResult(index)
         end
     end
 
-    local timeLeft
-    if isFunction("GetAuctionItemTimeLeft") then
-        local timeOk, value = pcall(GetAuctionItemTimeLeft, "list", index)
-        if timeOk then
-            timeLeft = value
-        end
-    end
-
     stackCount = tonumber(stackCount) or 0
     buyoutTotal = tonumber(buyoutTotal) or 0
 
+    local resolvedItemID = tonumber(itemID) or getItemIDFromLink(itemLink)
     local infoName, itemType, itemSubType, maxStack, equipSlot, vendorPrice
-    if isFunction("GetItemInfo") then
+    local cachedInfo = resolvedItemID and self.itemInfoCache[resolvedItemID] or nil
+    if cachedInfo then
+        infoName = cachedInfo.name
+        itemType = cachedInfo.itemType
+        itemSubType = cachedInfo.itemSubType
+        maxStack = cachedInfo.maxStack
+        equipSlot = cachedInfo.equipSlot
+        vendorPrice = cachedInfo.vendorPrice
+    elseif isFunction("GetItemInfo") then
         local infoOk, resolvedName, _, _, _, _, resolvedType, resolvedSubType, resolvedMaxStack, resolvedEquipSlot, _, resolvedVendorPrice =
-            pcall(GetItemInfo, itemLink or tonumber(itemID))
+            pcall(GetItemInfo, itemLink or resolvedItemID)
         if infoOk then
             infoName = resolvedName
             itemType = resolvedType
@@ -164,6 +184,16 @@ function BOD.AuctionAPI:GetResult(index)
             maxStack = tonumber(resolvedMaxStack)
             equipSlot = resolvedEquipSlot
             vendorPrice = tonumber(resolvedVendorPrice)
+            if resolvedItemID and resolvedName and maxStack and maxStack > 0 then
+                self.itemInfoCache[resolvedItemID] = {
+                    name = infoName,
+                    itemType = itemType,
+                    itemSubType = itemSubType,
+                    maxStack = maxStack,
+                    equipSlot = equipSlot,
+                    vendorPrice = vendorPrice,
+                }
+            end
         end
     end
 
@@ -171,7 +201,7 @@ function BOD.AuctionAPI:GetResult(index)
         index = index,
         name = name or infoName,
         itemLink = itemLink,
-        itemID = tonumber(itemID) or getItemIDFromLink(itemLink),
+        itemID = resolvedItemID,
         texture = texture,
         stackCount = stackCount,
         quality = quality,
@@ -182,7 +212,6 @@ function BOD.AuctionAPI:GetResult(index)
         currentBid = tonumber(currentBid) or 0,
         owner = owner,
         ownerFullName = ownerFullName,
-        timeLeft = timeLeft,
         saleStatus = saleStatus,
         hasAllInfo = hasAllInfo,
         itemType = itemType,

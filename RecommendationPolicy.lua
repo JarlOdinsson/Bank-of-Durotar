@@ -28,6 +28,7 @@ local RISK_TEXT = {
     SCAN_REQUIRED = "Run a new scan before buying.",
     BUDGET_TOO_LOW = "The safe stack costs more than the available budget.",
     POOR_PERSONAL_SALES = "This item has usually expired for you.",
+    CACHED_DATA_AGING = "Cached market data is aging; refresh before committing meaningful gold.",
 }
 
 local function wholeNumber(value)
@@ -71,6 +72,7 @@ local function choosePrimaryRisk(candidate, minimumProfit)
     local quantity = wholeNumber(candidate.totalMarketQuantity) or 0
 
     if reference > 0 and current > 0 and current < (reference * 0.35) then return "PRICE_MAY_BE_MANIPULATED" end
+    if (wholeNumber(candidate.dataAgeSeconds) or 0) > 14400 then return "CACHED_DATA_AGING" end
     if historyCount < 5 or historyDays < 3 then return "LOW_HISTORICAL_CONFIDENCE" end
     if grossSale > 0 and deposit >= (grossSale * 0.10) then return "HIGH_DEPOSIT_COST" end
     if expectedProfit > 0 and conservativeProfit < (expectedProfit * 0.5) then return "PROFIT_DEPENDS_ON_RELISTING" end
@@ -141,11 +143,11 @@ function BOD.RecommendationPolicy:Evaluate(candidate, options)
     end
 
     local trustLabel = "SPECULATIVE"
-    if confidence == "HIGH" and age <= 21600 and historyDays >= 3 and historyCount >= 5
+    if confidence == "HIGH" and age < 3600 and historyDays >= 3 and historyCount >= 5
         and listings >= 5 and conservativeProfit >= (minimumProfit * 2) and current <= (maximum * 0.85)
     then
         trustLabel = "STRONG"
-    elseif (confidence == "HIGH" or confidence == "MEDIUM") and historyCount >= 2 and listings >= 3 then
+    elseif age <= 14400 and (confidence == "HIGH" or confidence == "MEDIUM") and historyCount >= 2 and listings >= 3 then
         trustLabel = "FAIR"
     end
 
@@ -169,6 +171,9 @@ function BOD.RecommendationPolicy:IsBetterOpportunity(left, right)
     local leftOwned = wholeNumber(left and left.ownedQuantity) or 0
     local rightOwned = wholeNumber(right and right.ownedQuantity) or 0
     if leftOwned ~= rightOwned then return leftOwned < rightOwned end
+    local leftEfficiency = wholeNumber(left and left.capitalEfficiencyBps) or 0
+    local rightEfficiency = wholeNumber(right and right.capitalEfficiencyBps) or 0
+    if leftEfficiency ~= rightEfficiency then return leftEfficiency > rightEfficiency end
     local leftProfit = wholeNumber(left and left.conservativeNetProfit) or 0
     local rightProfit = wholeNumber(right and right.conservativeNetProfit) or 0
     if leftProfit ~= rightProfit then return leftProfit > rightProfit end

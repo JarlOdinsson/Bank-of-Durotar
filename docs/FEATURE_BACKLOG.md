@@ -2,7 +2,7 @@
 
 ## How to read this backlog
 
-Every idea is evaluated against the current 0.5.0-beta.1 implementation. `False confidence` rates the danger of misleading the player if implemented poorly. `Bloat` rates pressure against the lightweight product philosophy.
+Every idea is evaluated against the current 0.5.0-beta.3 implementation. `False confidence` rates the danger of misleading the player if implemented poorly. `Bloat` rates pressure against the lightweight product philosophy.
 
 ## Recommendation accuracy
 

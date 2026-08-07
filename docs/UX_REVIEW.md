@@ -12,7 +12,7 @@ Buy, bag-sale, and craft suggestions now show item icons. Hover help explains tr
 
 ## Trades view implementation
 
-Top navigation is now `Plan | Trades | Craft | Sell Price`. Trades uses the existing visual language and a single scrolling workspace: Trading Capital, Best Trade, two More Trades, up to five Open Trades, manual lifecycle controls, and two recent history rows. A separate Trade Rules surface keeps advanced capital and evidence settings out of Plan.
+Top navigation is now `Plan | Shop | Trades | Craft | Sell`. Shop keeps exact-item acquisition depth separate from the quick Plan. Trades uses the existing visual language and a single scrolling workspace: Trading Capital, Best Trade, two More Trades, up to five Open Trades, manual lifecycle controls, and two recent history rows. A separate Trade Rules surface keeps advanced capital and evidence settings out of Plan.
 
 `Find Auctions` provides the item name and maximum price but performs no query or purchase. `Track Trade` explicitly creates a Watching record. More Trades and Open Trades are selected by clicking their rows. Purchase and sale forms use quantities plus unit/net silver to keep manual accounting compact. Reset Trade Data requires a second confirmation click and preserves market history, mailbox outcomes, and general settings.
 

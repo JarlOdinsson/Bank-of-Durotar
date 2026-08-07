@@ -50,6 +50,8 @@ local speculative = BOD.RecommendationPolicy:Evaluate(copy(base, {
     confidence = "MEDIUM", historyObservationCount = 1, historyDayCount = 1,
 }), options)
 expect(speculative.actionable and speculative.trustLabel == "SPECULATIVE", "speculative label")
+local aging = BOD.RecommendationPolicy:Evaluate(copy(base, { dataAgeSeconds = 14401 }), options)
+expect(aging.actionable and aging.trustLabel == "SPECULATIVE" and aging.mainRiskCode == "CACHED_DATA_AGING", "aging cache lowers Plan confidence")
 
 local negative = BOD.RecommendationPolicy:Evaluate(copy(base, { expectedNetProfit = -1 }), options)
 expect(not negative.actionable and negative.rejectionCode == "NO_EXPECTED_PROFIT", "negative profit avoided")
@@ -88,6 +90,9 @@ expect(BOD.RecommendationPolicy:IsBetterOpportunity(alpha, beta), "stable name t
 local unowned = copy(alpha, { itemName = "Unowned", ownedQuantity = 0 })
 local partlyOwned = copy(alpha, { itemName = "Owned", ownedQuantity = 2 })
 expect(BOD.RecommendationPolicy:IsBetterOpportunity(unowned, partlyOwned), "owned inventory lowers rank")
+local efficient = copy(alpha, { itemName = "Efficient", capitalEfficiencyBps = 1800, conservativeNetProfit = 2000 })
+local absoluteProfit = copy(alpha, { itemName = "Absolute", capitalEfficiencyBps = 900, conservativeNetProfit = 9000 })
+expect(BOD.RecommendationPolicy:IsBetterOpportunity(efficient, absoluteProfit), "capital efficiency ranks equal-trust unowned buys")
 
 local stale = BOD.RecommendationPolicy:CheckFreshness(
     { maximumSafeUnitPrice = 900, snapshotId = 1 },
@@ -105,5 +110,13 @@ local changed = BOD.RecommendationPolicy:CheckFreshness(
     86400
 )
 expect(not changed.safe and changed.state == "PRICE_CHANGED", "changed price")
+local superseded = BOD.RecommendationPolicy:CheckFreshness(
+    { maximumSafeUnitPrice = 900, snapshotId = 1 },
+    { lowestUnitBuyout = 700 },
+    { id = 2, observationTimestamp = 1000 },
+    1100,
+    86400
+)
+expect(superseded.safe and superseded.state == "UPDATED_SAFE", "new scan identifies superseded recommendation")
 
 print("recommendation policy: PASS")

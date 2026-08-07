@@ -8,7 +8,7 @@ Trades deliberately resembles a lightweight Auction House desk rather than a bro
 
 ## Executive assessment
 
-Bank of Durotar 0.5.0-beta.1 is a working, calculation-only Auction House advisor for WoW Classic Anniversary. Its strongest product decision is restraint: a player deliberately starts one full-market scan, the addon stores bounded local data, and all buying, posting, vending, crafting, and trade tracking remain manual. It covers the core scan → quick moves or larger trades → bag-sale suggestions → craft suggestions loop.
+Bank of Durotar 0.5.0-beta.3 is a working, calculation-only Auction House advisor for WoW Classic Anniversary. Its strongest product decision is restraint: a player deliberately starts one full-market scan, the addon stores bounded local data, and all buying, posting, vending, crafting, and trade tracking remain manual. It covers the core cached scan → Plan or exact-item Shop → larger trades → bag-sale suggestions → craft suggestions loop.
 
 The largest gap is not missing breadth. It is the distance between what the recommendation UI appears to know and what the Classic API actually reveals. The addon observes listings, not realm-wide completed sales. It has a small personal sold/expired sample from mailbox invoices, but no broad sale velocity, seller count, current owned auctions, cost basis, bank/mail inventory, or repeated-relisting model. The next product phase should improve trust, purchase sizing, and outcome tracking before adding more markets or automation.
 
@@ -35,9 +35,9 @@ The boundaries are generally good. Data acquisition, storage, calculations, work
 
 ## Saved-variable structure
 
-`BankOfDurotarDB` uses top-level schema version 11:
+`BankOfDurotarDB` uses top-level schema version 13:
 
-- `marketData` schema 3: a single `currentSnapshot` plus its ID.
+- `marketData` schema 4: one latest completed compact snapshot per bounded project/region/realm/faction scope plus separate targeted-item overlays.
 - `scan` schema 1: last full query, last completion, and last availability state.
 - `history` schema 3: realm key, item daily rows, scan-day counts, totals, and cleanup metadata.
 - `crafting` schema 1: up to 12 character/profession sets, each capped at 400 recipes.

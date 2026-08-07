@@ -2,7 +2,6 @@ local addonName, BOD = ...
 
 BOD.PricingService = {}
 
-local DAY_SECONDS = 86400
 local MAX_SAFE_INTEGER = 2147483647
 local AUCTION_CUT_RATE = 0.05
 local DEPOSIT_RATE_24H = 0.30
@@ -30,13 +29,17 @@ local function clamp(value, minValue, maxValue)
     return value
 end
 
-local function getCurrentItem(itemKey)
+local function getCurrentItem(itemKey, context)
     local snapshot = BOD.MarketData and BOD.MarketData:GetLatestSnapshot()
     if not snapshot or snapshot.complete ~= true or type(snapshot.items) ~= "table" then
         return nil, snapshot
     end
-    if BOD.MarketData.GetCurrentItem then
-        return BOD.MarketData:GetCurrentItem(itemKey), snapshot
+    local overlay = context and context.useTargetedOverlay ~= false and BOD.MarketData.GetTargetedOverlay
+        and BOD.MarketData:GetTargetedOverlay(itemKey) or nil
+    if overlay and type(overlay.item) == "table" then
+        return overlay.item, snapshot, overlay
+    elseif BOD.MarketData.GetCurrentItem then
+        return BOD.MarketData:GetCurrentItem(itemKey), snapshot, nil
     end
     return snapshot.items[itemKey], snapshot
 end
@@ -49,16 +52,8 @@ local function getAgeSeconds(snapshot)
 end
 
 local function freshness(ageSeconds)
-    if not ageSeconds then
-        return "NO_DATA"
-    elseif ageSeconds <= DAY_SECONDS then
-        return "FRESH"
-    elseif ageSeconds <= 7 * DAY_SECONDS then
-        return "USABLE"
-    elseif ageSeconds <= 30 * DAY_SECONDS then
-        return "STALE"
-    end
-    return "EXPIRED"
+    if not ageSeconds then return "NO_DATA" end
+    return BOD.MarketCache and BOD.MarketCache:ClassifyAge(ageSeconds, BOD.db and BOD.db.settings) or "HISTORICAL_ONLY"
 end
 
 local function confidenceFor(item, fresh)
@@ -66,10 +61,12 @@ local function confidenceFor(item, fresh)
         return "NONE"
     end
     local sampleCount = tonumber(item.sampleCount) or 0
-    if fresh == "EXPIRED" or fresh == "NO_DATA" then
+    if fresh == "HISTORICAL_ONLY" or fresh == "NO_DATA" then
         return "NONE"
     elseif fresh == "STALE" then
         return sampleCount >= 20 and "LOW" or "NONE"
+    elseif fresh == "AGING" then
+        return sampleCount >= 20 and "MEDIUM" or "LOW"
     elseif sampleCount >= 30 then
         return "HIGH"
     elseif sampleCount >= 6 then
@@ -130,7 +127,7 @@ function BOD.PricingService:GetRecommendation(itemKey, stackCount, context)
         }
     end
 
-    local item, snapshot = getCurrentItem(itemKey)
+    local item, snapshot, overlay = getCurrentItem(itemKey, context)
     if not item then
         return {
             status = "NO_DATA",
@@ -144,15 +141,26 @@ function BOD.PricingService:GetRecommendation(itemKey, stackCount, context)
 
     local ageSeconds = getAgeSeconds(snapshot)
     local fresh = freshness(ageSeconds)
-    local confidence = confidenceFor(item, fresh)
+    local confidence = confidenceFor(item, overlay and "FRESH" or fresh)
     local reasonCodes = {}
     local history = BOD.MarketHistory and BOD.MarketHistory.GetSummary and BOD.MarketHistory:GetSummary(itemKey) or nil
     local sevenDayMedian = history and history.sevenDay and history.sevenDay.median or nil
     local thirtyDayMedian = history and history.thirtyDay and history.thirtyDay.median or nil
 
-    if fresh == "STALE" then
+    local maximumSellAge = tonumber(BOD.db and BOD.db.settings and BOD.db.settings.maximumSellRecommendationAgeSeconds) or 3600
+    local targetedCheckedAt = overlay and tonumber(overlay.checkedAt) or nil
+    if context.requireCurrentValidation == true and not targetedCheckedAt and ageSeconds > maximumSellAge then
+        return {
+            status = "VALIDATION_REQUIRED", confidence = confidence, itemKey = itemKey,
+            itemName = item.itemName or item.name, stackCount = stackCount, dataAgeSeconds = ageSeconds,
+            freshness = fresh, cachedUnitBuyout = item.lowestUnitBuyout, snapshotId = snapshot.scanId or snapshot.id,
+            sourceScanCompletedAt = snapshot.completedAt, reasonCodes = { "CURRENT_ITEM_CHECK_REQUIRED" },
+            explanation = { "The cached price is useful for context, but this item must be checked before posting." },
+        }
+    end
+    if fresh == "STALE" and not targetedCheckedAt then
         reasonCodes[#reasonCodes + 1] = "STALE_DATA"
-    elseif fresh == "EXPIRED" then
+    elseif fresh == "HISTORICAL_ONLY" and not targetedCheckedAt then
         return {
             status = "REFRESH_DATA",
             confidence = "NONE",
@@ -217,7 +225,8 @@ function BOD.PricingService:GetRecommendation(itemKey, stackCount, context)
     local economics = self:GetSaleEconomics(itemKey, stackCount, stackBuyout)
 
     local explanation = {
-        "Recommendation is based on local completed-scan data.",
+        targetedCheckedAt and "Recommendation uses a current targeted-item check layered over the completed full scan."
+            or "Recommendation is based on cached local completed-scan data.",
         "Player must enter values manually in Blizzard's Auction House.",
     }
     if sevenDayMedian then
@@ -264,5 +273,11 @@ function BOD.PricingService:GetRecommendation(itemKey, stackCount, context)
         expectedNetSale = economics.expectedNetSale,
         vendorValue = economics.vendorValue,
         personalSales = economics.personalSales,
+        snapshotId = snapshot.scanId or snapshot.id,
+        sourceScanCompletedAt = snapshot.completedAt,
+        recommendationTimestamp = now(),
+        sourceType = targetedCheckedAt and "TARGETED_ITEM" or "FULL_SCAN_CACHE",
+        targetedValidationAt = targetedCheckedAt,
+        observedUnitPrice = item.lowestUnitBuyout,
     }
 end

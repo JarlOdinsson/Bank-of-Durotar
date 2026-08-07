@@ -1,5 +1,25 @@
 # Changelog
 
+## 0.5.0-beta.3 — Shop and acquisition depth
+
+- Added a dedicated `Shop` view for exact typed, Shift-clicked, or dragged item selection.
+- Added optional additional-buy quantity and budget controls with whole-stack selection and cumulative weighted cost.
+- Persisted at most 12 seller-free stack/total price groups per item; raw listings and seller identities are still not stored.
+- Added conservative fair value, safe ceiling, price-cliff detection, owned-bag quantity, freshness warnings, and explicit weak-evidence states.
+- Added one shared acquisition evaluator used by both Shop and Plan, including capital-efficiency ranking inputs based on conservative margin, evidence, and market depth.
+- Preserved old cached snapshots through an explicit cheapest-stack fallback that asks for a fresh scan to obtain depth.
+- Added deterministic Lua/Python coverage for target sizing, budgets, weighted averages, cliff detection, weak evidence, old-cache fallback, and bounded aggregation.
+
+## 0.5.0-beta.2 — Persistent market cache
+
+- Added one compact latest-completed snapshot per bounded project/region/realm/faction market scope.
+- Migrated the prior single-snapshot schema without crossing market boundaries.
+- Added atomic completion validation so interrupted or invalid refreshes preserve the prior snapshot.
+- Added deterministic freshness labels, coverage counts, and exact completion details.
+- Added cached-data reuse on Auction House reopen, `/reload`, and logout without automatic full scans.
+- Added player-clicked targeted item checks for Sell and selected Trades as a separate expiring overlay.
+- Added recommendation source linkage, feature-specific aging rules, cache commands, tests, and documentation.
+
 ## 0.5.0-beta.1 — Milestone A and Trades vertical slice
 
 ### Plan money controls

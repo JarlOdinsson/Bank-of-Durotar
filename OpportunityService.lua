@@ -61,6 +61,14 @@ local function buildOpportunity(itemKey, item, snapshot, filters, context)
     local sharedAnalysis = BOD.MarketAnalysis and BOD.MarketAnalysis:Analyze(itemKey, item, snapshot, {
         ownedQuantities = context and context.ownedQuantities,
     }) or nil
+    local acquisition = BOD.AcquisitionEvaluator and BOD.AcquisitionEvaluator:EvaluateItem(itemKey, item, snapshot, {
+        budgetCopper = filters.maximumCapitalRequired,
+        quantityCap = filters.maximumQuickQuantity or 20,
+        context = { ownedQuantities = context and context.ownedQuantities },
+    }) or nil
+    if not acquisition or (tonumber(acquisition.purchaseQuantity) or 0) <= 0 then
+        return nil, acquisition and acquisition.status or "INVALID_DATA"
+    end
     local observationCount = tonumber(sharedAnalysis and sharedAnalysis.observationCount)
         or tonumber(historySummary and historySummary.observationCount) or 0
     local hasHistory = observationCount >= 2
@@ -68,11 +76,13 @@ local function buildOpportunity(itemKey, item, snapshot, filters, context)
     local historicalMedian = hasHistory and historySummary.sevenDay and tonumber(historySummary.sevenDay.median) or nil
     local reference = tonumber(sharedAnalysis and sharedAnalysis.supportedMarketValue)
         or (historicalMedian and historicalMedian > 0 and math.min(scanReference, historicalMedian) or scanReference)
-    local current = tonumber(item.lowestUnitBuyout) or 0
-    local availableQuantity = math.max(1, math.floor(tonumber(item.bestListingStackCount) or 1))
+    local current = tonumber(acquisition.averageUnitCost) or tonumber(item.lowestUnitBuyout) or 0
+    local availableQuantity = math.max(1, math.floor(tonumber(acquisition.purchaseQuantity) or 1))
     local economics = BOD.PricingService:GetSaleEconomics(itemKey, availableQuantity, reference * availableQuantity)
     local estimatedNetResalePerUnit = math.floor(economics.expectedNetSale / availableQuantity)
-    local maximumSafeUnitPrice = math.floor(estimatedNetResalePerUnit - (reference * MINIMUM_MARGIN_RATE))
+    local maximumSafeUnitPrice = math.min(
+        math.floor(estimatedNetResalePerUnit - (reference * MINIMUM_MARGIN_RATE)),
+        tonumber(acquisition.safeCeiling) or 2147483647)
     if reference <= current or current > maximumSafeUnitPrice or estimatedNetResalePerUnit <= current then
         return nil, "PRICE_ABOVE_SAFE_LIMIT"
     end
@@ -81,7 +91,7 @@ local function buildOpportunity(itemKey, item, snapshot, filters, context)
     local listings = tonumber(item.listingCount) or 0
     local sampleCount = tonumber(item.sampleCount) or 0
     local upsidePerUnit = estimatedNetResalePerUnit - current
-    local capitalRequired = math.floor(tonumber(item.bestListingBuyoutTotal) or (current * availableQuantity))
+    local capitalRequired = math.floor(tonumber(acquisition.capitalRequired) or (current * availableQuantity))
     local estimatedTotalUpside = upsidePerUnit * availableQuantity
     local confidenceValue = confidence(sampleCount, listings, hasHistory)
     if confidenceValue == "NONE" then
@@ -171,6 +181,7 @@ local function buildOpportunity(itemKey, item, snapshot, filters, context)
         opportunityScore = score,
         easeScore = easeScore,
         flipScore = flipScore,
+        capitalEfficiencyBps = acquisition.capitalEfficiencyBps,
         profitRate = profitRate,
         confidence = confidenceValue,
         demand = sharedAnalysis and sharedAnalysis.demand or "UNKNOWN",
@@ -199,6 +210,7 @@ local function buildOpportunity(itemKey, item, snapshot, filters, context)
         grossSale = grossSale,
         availableQuantity = availableQuantity,
         currentQuantity = availableQuantity,
+        acquisition = acquisition,
         totalMarketQuantity = quantity,
         listingCount = listings,
         capitalRequired = capitalRequired,
@@ -211,6 +223,9 @@ local function buildOpportunity(itemKey, item, snapshot, filters, context)
         dataAgeSeconds = dataAgeSeconds,
         recommendationTimestamp = type(time) == "function" and time() or os.time(),
         snapshotId = snapshot.scanId or snapshot.id,
+        sourceScanCompletedAt = snapshot.completedAt,
+        sourceType = "FULL_SCAN_CACHE",
+        freshnessLabel = BOD.MarketCache and BOD.MarketCache:ClassifyAge(dataAgeSeconds, BOD.db and BOD.db.settings) or nil,
         observedUnitPrice = current,
         reasonCodes = reasons,
         explanation = {

@@ -123,7 +123,9 @@ function BOD.TradePolicy:Evaluate(analysis, context)
         return reject(limits.committedCapital > 0 and limits.totalCommitmentLimit > 0
             and limits.committedCapital >= limits.totalCommitmentLimit and "TOTAL_CAPITAL_COMMITTED" or "CAPITAL_TOO_LOW")
     end
-    if (wholeNumber(analysis.dataAgeSeconds) or MAX_SAFE_INTEGER) > 43200 then return reject("STALE_DATA") end
+    local dataAge = wholeNumber(analysis.dataAgeSeconds) or MAX_SAFE_INTEGER
+    local maximumDataAge = wholeNumber(settings.maximumTradeDataAgeSeconds) or 43200
+    if dataAge > maximumDataAge then return reject("STALE_DATA") end
     local minimumObservations = math.max(mode.minimumObservations, wholeNumber(settings.minimumObservationCount) or 0)
     if analysis.observationCount < minimumObservations or analysis.observationDayCount < math.min(5, minimumObservations) then return reject("INSUFFICIENT_HISTORY") end
     if not analysis.fastExitUnitPrice or analysis.fastExitUnitPrice <= analysis.currentUnitPrice
@@ -141,7 +143,14 @@ function BOD.TradePolicy:Evaluate(analysis, context)
     if rankValue(CONFIDENCE_RANK, analysis.confidence) < confidenceFloor then return reject("CONFIDENCE_TOO_LOW") end
     if analysis.confidence == "SPECULATIVE" and settings.showSpeculativeTrades ~= true then return reject("CONFIDENCE_TOO_LOW") end
 
-    local recommendedQuantity, remainingExposure = self:SizePosition(analysis, limits, false)
+    local sizingLimits = limits
+    if dataAge > 14400 then
+        sizingLimits = {}
+        for key, value in pairs(limits) do sizingLimits[key] = value end
+        sizingLimits.perTradeLimit = math.floor(limits.perTradeLimit * 0.5)
+        sizingLimits.availableCapital = math.min(limits.availableCapital, sizingLimits.perTradeLimit)
+    end
+    local recommendedQuantity, remainingExposure = self:SizePosition(analysis, sizingLimits, false)
     if recommendedQuantity <= 0 then
         return reject(analysis.ownedQuantity > 0 and "EXISTING_EXPOSURE_TOO_HIGH" or "POSITION_TOO_LARGE")
     end
@@ -192,6 +201,12 @@ function BOD.TradePolicy:Evaluate(analysis, context)
         mainRisk = mainRisk,
         capitalAfterPurchaseRate = limits.deployableCapital > 0 and (limits.committedCapital + capital) / limits.deployableCapital or 0,
         why = "Repeated local observations support the exit range, and the current exact listing is below that range after fees.",
+        snapshotId = analysis.snapshotId,
+        sourceScanCompletedAt = analysis.sourceScanCompletedAt,
+        recommendationTimestamp = analysis.recommendationTimestamp,
+        observedUnitPrice = analysis.observedUnitPrice,
+        sourceType = analysis.sourceType,
+        freshnessLabel = analysis.freshnessLabel,
     }
 end
 

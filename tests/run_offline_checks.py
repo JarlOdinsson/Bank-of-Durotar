@@ -46,6 +46,18 @@ def migrate_plan_copper(value: object, fallback: int) -> int:
     return fallback
 
 
+def cache_freshness(age: int) -> str:
+    if age < 3_600:
+        return "FRESH"
+    if age <= 14_400:
+        return "RECENT"
+    if age <= 43_200:
+        return "AGING"
+    if age <= 86_400:
+        return "STALE"
+    return "HISTORICAL_ONLY"
+
+
 def median(values: list[int]) -> int | None:
     values = sorted(values)
     if not values:
@@ -361,12 +373,48 @@ def test_plan_money() -> None:
     check(plan_money(8, 0, 0)[3] != plan_money(0, 50, 0)[3], "budget and minimum profit separate")
 
 
+def test_market_cache() -> None:
+    expected = {
+        3_599: "FRESH", 3_600: "RECENT", 14_400: "RECENT", 14_401: "AGING",
+        43_200: "AGING", 43_201: "STALE", 86_400: "STALE", 86_401: "HISTORICAL_ONLY",
+    }
+    for age, label in expected.items():
+        check(cache_freshness(age) == label, f"cache freshness boundary {age}")
+    scopes = [f"scope:{index}" for index in range(6)]
+    retained = scopes[-4:]
+    check(len(retained) == 4 and "scope:0" not in retained, "cache scope pruning")
+    full_completed_at = 1_000
+    overlay = {"item:1": {"checked_at": 4_000, "price": 90}}
+    check(overlay["item:1"]["price"] == 90 and full_completed_at == 1_000, "targeted overlay preserves full timestamp")
+
+
+def test_acquisition_selection() -> None:
+    offers = [(5, 400), (3, 270), (10, 1500), (10, 1500)]
+    safe_ceiling = 96
+    safe = [(quantity, cost) for quantity, cost in offers if cost // quantity <= safe_ceiling]
+    states = {0: (0, [])}
+    for offer_index, (quantity, cost) in enumerate(safe):
+        updated = dict(states)
+        for owned, (total, chosen) in states.items():
+            candidate = (total + cost, chosen + [offer_index])
+            if owned + quantity <= 12 and (owned + quantity not in updated or candidate[0] < updated[owned + quantity][0]):
+                updated[owned + quantity] = candidate
+        states = updated
+    result_quantity, (result_cost, _) = min(
+        ((quantity, state) for quantity, state in states.items() if quantity >= 8),
+        key=lambda value: (value[1][0], value[0]),
+    )
+    check((result_quantity, result_cost, result_cost // result_quantity) == (8, 670, 83),
+          "target quantity uses whole-stack weighted cost")
+    check(150 * 100 >= 90 * 120 and 150 > safe_ceiling, "unsafe 20 percent price jump is a cliff")
+
+
 def test_package() -> None:
     toc = read("BankOfDurotar.toc")
     loaded = [line.strip() for line in toc.splitlines() if line.strip().endswith(".lua")]
-    check(len(loaded) == 19, "minimal module count")
+    check(len(loaded) == 22, "minimal module count")
     check(all((ROOT / path).is_file() for path in loaded), "TOC files exist")
-    check("## Version: 0.5.0-beta.1" in toc and 'BOD.version = "0.5.0-beta.1"' in read("Core.lua"), "version alignment")
+    check("## Version: 0.5.0-beta.3" in toc and 'BOD.version = "0.5.0-beta.3"' in read("Core.lua"), "version alignment")
 
     source = "\n".join(read(path) for path in loaded)
     check("StartAuction(" not in source, "no posting calls")
@@ -394,6 +442,9 @@ def test_workflow() -> None:
     trade_tracker = read("TradeTracker.lua")
     trade_service = read("TradeService.lua")
     plan_money_source = read("PlanMoney.lua")
+    market_cache = read("MarketCache.lua")
+    targeted_scan = read("TargetedScan.lua")
+    acquisition = read("AcquisitionEvaluator.lua")
 
     check('"AUCTION_ITEM_LIST_UPDATE"' in core, "result event registered")
     check("QueryAuctionItems" not in scan, "scanner uses API adapter")
@@ -404,10 +455,17 @@ def test_workflow() -> None:
           "scanner listens for synchronous result events before sending query")
     check("ITEM_QUALITY_COLORS[-1]" in read("AuctionAPI.lua"), "legacy get-all UI guard")
     check("bestListingStackCount" in market and "bestListingBuyoutTotal" in market, "exact cheapest stack sizing")
-    check("MARKET_DATA_SCHEMA_VERSION = 3" in market, "compact market schema")
-    check("db.currentByRealm[" not in market and "db.currentSnapshot = record" in market, "snapshot stored once")
+    check("MAX_ACQUISITION_GROUPS = 12" in market and "acquisitionGroups" in market, "bounded seller-free acquisition depth")
+    check("MARKET_DATA_SCHEMA_VERSION = 4" in market, "compact scoped market schema")
+    check("db.currentByRealm[" not in market and "MarketCache:Commit" in market, "snapshot stored once per retained scope")
     check("HISTORY_SCHEMA_VERSION = 3" in history, "daily history schema")
     check("MAX_TRACKED_ITEMS = 1000" in history and "RETENTION_DAYS = 30" in history, "bounded 30-day history")
+    check("MAX_ITEMS_PER_SNAPSHOT = 2500" in market_cache and "BoundSnapshot" in market_cache,
+          "completed market snapshots are bounded")
+    check("PROCESS_CHUNK_SIZE = 100" in scan and "ResetResultCache" in scan,
+          "large full scans yield frequently and reset metadata cache")
+    check("if BOD.FullScanProbe.active then" in sidecar and "self:RefreshGuide()" in sidecar,
+          "scan progress does not rebuild market recommendations")
     check("updateAverage" in history and "GetLearningStatus" in history, "market learning model")
     check("FindItemByText" in market, "typed and linked item lookup")
     check("FindExactItemByName" in market and "maxStack" in market, "safe scan item identity")
@@ -415,6 +473,14 @@ def test_workflow() -> None:
     check("MAX_TRACKED_ITEMS = 500" in sales and "mailboxCounts" in sales, "bounded deduplicated sale memory")
     check("ESTIMATED_AUCTION_CUT_RATE" in opportunity and "maximumSafeUnitPrice" in opportunity, "safe buy math")
     check("budgetCopper * 0.5" in gold_plan and "cost <= remaining" in gold_plan, "budget limits")
+    check("AcquisitionEvaluator:EvaluateItem" in opportunity and "acquisition.capitalRequired" in opportunity,
+          "Plan uses shared acquisition evaluator")
+    check("selectForTarget" in acquisition and "cumulativeSteps" in acquisition and "capitalEfficiencyBps" in acquisition,
+          "acquisition evaluator models whole stacks, cumulative cost, and capital efficiency")
+    check("confidenceWeight" in acquisition and "depthWeight" in acquisition and "LOW_CONFIDENCE" in acquisition,
+          "acquisition confidence and depth safeguards")
+    check("capitalEfficiencyBps" in read("RecommendationPolicy.lua"),
+          "safe Plan candidates rank by shared capital efficiency after trust and ownership")
     check("BUY_LIMIT = 10" in gold_plan and "SELL_LIMIT = 3" in gold_plan, "ten-buy and three-sell limits")
     check("GetContainerItemInfo" in gold_plan and "isBound ~= true" in gold_plan, "bag item filtering")
     check('minimumConfidence = "MEDIUM"' in gold_plan, "safe plan confidence")
@@ -455,7 +521,12 @@ def test_workflow() -> None:
     check("CollectBagInventory" in gold_plan and "ownedQuantities" in gold_plan, "owned bag exposure awareness")
     check("SAFE_AT_SCAN_TIME" in read("RecommendationPolicy.lua") and "not a live price check" in read("RecommendationPolicy.lua"), "recommendation freshness language")
     check('SetView("PLAN")' in scan, "scan opens Gold Plan")
-    check('{ "PLAN", "Plan" }, { "TRADES", "Trades" }, { "CRAFT", "Craft" }, { "SELL", "Sell Price" }' in sidecar, "Plan Trades Craft Sell navigation")
+    check('{ "PLAN", "Plan" }, { "SHOP", "Shop" }, { "TRADES", "Trades" }, { "CRAFT", "Craft" }, { "SELL", "Sell" }' in sidecar, "Plan Shop Trades Craft Sell navigation")
+    check("function BOD.Sidecar:RefreshShop" in sidecar and "ADDITIONAL QUANTITY TO BUY" in sidecar,
+          "dedicated exact-item Shop workflow")
+    check("FindExactItemByName" in sidecar and "Exact market identity:" in sidecar,
+          "Shop avoids ambiguous equipment identity")
+    check("Nothing here clicks, buys, bids" in sidecar, "Shop remains manual advisory UI")
     check("TRADING CAPITAL" in sidecar and "BEST TRADE" in sidecar and "MORE TRADES" in sidecar and "OPEN TRADES" in sidecar and "TRADE HISTORY" in sidecar, "dedicated Trades view sections")
     check("BuildSupportedValues" in market_analysis and "ClassifyDemand" in market_analysis and "ClassifyConfidence" in market_analysis, "shared market analysis")
     check("BOD.QuickMovePolicy" in quick_policy and "BOD.TradePolicy" in trade_policy, "separate policy layers")
@@ -465,9 +536,20 @@ def test_workflow() -> None:
     check("AddPurchase" in trade_tracker and "purchaseBatches" in trade_tracker and "averageUnitCost" in trade_tracker, "multiple purchase cost basis")
     check("RecordSale" in trade_tracker and "PARTIALLY_SOLD" in trade_tracker and "realizedProfit" in trade_tracker, "manual partial-sale accounting")
     check("MarkListed" in trade_tracker and "Close" in trade_tracker and "Abandon" in trade_tracker, "manual trade lifecycle")
-    check("schemaVersion = 12" in core and "trading = {" in core and "openTrades = {}" in core, "safe trading saved-variable area")
+    check("schemaVersion = 13" in core and "trading = {" in core and "openTrades = {}" in core, "safe trading saved-variable area")
     check("Trade Rules" in sidecar and "Reset Trade Data" in sidecar and "showSpeculativeTrades" in core, "Trades settings UI")
     check("StartAuction(" not in trade_service + trade_tracker + sidecar and "PlaceAuctionBid(" not in trade_service + trade_tracker + sidecar, "Trades remains advisory")
+    check("snapshotsByScope" in market_cache and "MAX_SCOPES = 4" in market_cache, "bounded per-market cache")
+    check("ValidateSnapshot" in market_cache and "MarketCache:Commit" in read("MarketData.lua") and "processedRecords ~= scanAuctionCount" in read("MarketData.lua"), "atomic completed-scan validation")
+    check("FRESH" in market_cache and "RECENT" in market_cache and "AGING" in market_cache and "HISTORICAL_ONLY" in market_cache, "central cache freshness labels")
+    check("RecordOverlay" in market_cache and "TARGETED_ITEM" in targeted_scan, "separate targeted item overlay")
+    check("SendTargetedSearch" in read("AuctionAPI.lua") and "requireCurrentValidation" in read("PricingService.lua"), "supported Sell item validation")
+    check("sourceScanCompletedAt" in opportunity and "recommendationTimestamp" in opportunity and "observedUnitPrice" in opportunity, "recommendation scan linkage")
+    check("maximumTradeDataAgeSeconds" in trade_policy and "dataAge > 14400" in trade_policy, "stricter aging Trade sizing")
+    check("REFRESH SCAN" in sidecar and "Scan Details" in sidecar and "Cached data is not live" in sidecar, "nonblocking cache status UI")
+    check("cache clear confirm" in core and "ClearCachedSnapshots" in read("MarketData.lua"), "cache clearing control")
+    check("automaticallyScanWhenNoCacheExists = false" in core and "reuseLastCompletedScan = true" in core, "safe cache defaults")
+    check("GetLatestSnapshot" not in sales, "historical sales log remains available without market cache")
 
 
 def main() -> None:
@@ -475,11 +557,13 @@ def main() -> None:
     test_recommendation_policy()
     test_trades_policy()
     test_plan_money()
+    test_market_cache()
+    test_acquisition_selection()
     test_package()
     test_workflow()
     lua = shutil.which("lua") or shutil.which("lua5.1")
     if lua:
-        for fixture in ("tests/recommendation_policy_test.lua", "tests/trade_system_test.lua", "tests/plan_money_test.lua"):
+        for fixture in ("tests/recommendation_policy_test.lua", "tests/trade_system_test.lua", "tests/plan_money_test.lua", "tests/market_cache_test.lua", "tests/market_data_test.lua", "tests/acquisition_evaluator_test.lua"):
             subprocess.run([lua, fixture], cwd=ROOT, check=True)
     print("offline checks: PASS")
 

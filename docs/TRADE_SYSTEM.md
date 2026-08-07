@@ -1,5 +1,9 @@
 # Trades System
 
+## Cached-data policy
+
+Trades uses the completed snapshot for the current market scope and defaults to a 12-hour maximum. Aging data over four hours halves allowed position capital; because Classic listings are indivisible, an exact stack that no longer fits is rejected. A targeted item check may verify entry price but never resets full-scan age. Existing tracked positions remain available with old or missing market data.
+
 ## Product roles
 
 - **Plan** is the fast workflow. A **quick move** is a small, simple recommendation that does not need lifecycle tracking.
