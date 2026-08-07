@@ -398,6 +398,10 @@ def test_workflow() -> None:
     check('"AUCTION_ITEM_LIST_UPDATE"' in core, "result event registered")
     check("QueryAuctionItems" not in scan, "scanner uses API adapter")
     check('QueryAuctionItems, "", nil, nil, 0, nil, nil, true, false, nil' in read("AuctionAPI.lua"), "verified 2.5.6 full-scan signature")
+    waiting_position = scan.find('self:SetState("WAITING_FOR_RESULTS")', scan.find("function BOD.FullScanProbe:SendQuery"))
+    send_position = scan.find("BOD.AuctionAPI:SendFullScanProbe()", scan.find("function BOD.FullScanProbe:SendQuery"))
+    check(waiting_position >= 0 and send_position >= 0 and waiting_position < send_position,
+          "scanner listens for synchronous result events before sending query")
     check("ITEM_QUALITY_COLORS[-1]" in read("AuctionAPI.lua"), "legacy get-all UI guard")
     check("bestListingStackCount" in market and "bestListingBuyoutTotal" in market, "exact cheapest stack sizing")
     check("MARKET_DATA_SCHEMA_VERSION = 3" in market, "compact market schema")

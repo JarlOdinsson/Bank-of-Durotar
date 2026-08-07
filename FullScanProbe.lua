@@ -368,7 +368,9 @@ function BOD.FullScanProbe:SendQuery(token)
         return
     end
 
-    self:SetState("QUERY_SENT")
+    -- Listen before sending: the client may deliver AUCTION_ITEM_LIST_UPDATE
+    -- synchronously, and a zero-delay timer is not guaranteed to run first.
+    self:SetState("WAITING_FOR_RESULTS")
     local ok, detail, signature = BOD.AuctionAPI:SendFullScanProbe()
     self.querySignature = signature
     if not ok then
@@ -380,16 +382,10 @@ function BOD.FullScanProbe:SendQuery(token)
     self.queryAccepted = true
     self:RecordQuerySent()
     BOD:Log("INFO", "FullScan", detail)
-    C_Timer.After(0, function()
-        if token ~= self.token or not self.active or self.state ~= "QUERY_SENT" then
-            return
+    C_Timer.After(RESULT_TIMEOUT, function()
+        if token == self.token and self.active and self.state == "WAITING_FOR_RESULTS" then
+            self:Timeout("Full-scan result wait timed out.")
         end
-        self:SetState("WAITING_FOR_RESULTS")
-        C_Timer.After(RESULT_TIMEOUT, function()
-            if token == self.token and self.active and self.state == "WAITING_FOR_RESULTS" then
-                self:Timeout("Full-scan result wait timed out.")
-            end
-        end)
     end)
 end
 
